@@ -159,6 +159,21 @@ WSL overhead), pre-caches all 7 specialists' votes, runs GRPO, and saves
 the LoRA + plots — all in one runtime. Uses `TransformersLLMClient` to call
 the loaded model in-process, so no separate vLLM server is needed.
 
+**Option C — Edit in VSCode, execute on Colab GPU.** Run
+[training/colab_launcher.ipynb](training/colab_launcher.ipynb) on Colab —
+it clones the repo, installs deps, builds the dataset, then exposes a
+Jupyter server through a free `cloudflared` tunnel and prints a single URL.
+In VSCode locally:
+
+1. Install the **Jupyter extension** (`ms-toolsai.jupyter`).
+2. Command Palette → *Jupyter: Specify Jupyter Server for Connections* →
+   paste the URL.
+3. Open `training/train_grpo.ipynb` locally and pick the remote kernel.
+
+You edit `.ipynb` cells in VSCode; execution happens on Colab's T4. When
+the runtime evicts (idle / 12-hour limit), re-run the launcher's `launch`
+cell for a fresh URL.
+
 ## Inference output format
 
 Standard OpenEnv `[START] / [STEP] / [END]` lines, plus a `[COUNCIL]` line per

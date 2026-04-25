@@ -20,12 +20,17 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+# Make `app.*` importable when this script is invoked as
+# `python scripts/build_dataset.py` (cwd may not be on sys.path).
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import pandas as pd
 import yfinance as yf
 
 from app.data import indicators as ta
 
-ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 SOURCES = DATA / "sources"
 CHARTS = DATA / "charts"
@@ -276,5 +281,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(ROOT))
     main()
