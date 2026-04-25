@@ -180,19 +180,50 @@ class TransformersLLMClient:
         cls,
         model_id: str = "google/gemma-4-E4B-it",
         load_in_4bit: bool = True,
-        device_map: Any = "auto",
+        device_map: Any = None,
+        max_memory: dict | None = None,
     ) -> "TransformersLLMClient":
+        """Load Gemma into memory.
+
+        Defaults that work on a single T4 (16 GB):
+          - 4-bit nf4 with double-quant
+          - fp16 compute (T4 has no bf16 silicon)
+          - device_map={"": 0} — force everything to GPU 0; transformers'
+            "auto" sometimes spills the vision tower to CPU on tight cards
+            and then refuses to load with `llm_int8_enable_fp32_cpu_offload`
+            unless given an explicit dict device_map.
+
+        Pass device_map="auto" + max_memory={0: "14GiB", "cpu": "30GiB"}
+        if you need offload (e.g. running on a 12GB card).
+        """
         import torch
         from transformers import AutoModelForCausalLM, AutoProcessor
 
-        # T4 (Turing) doesn't have bf16 hardware — fall back to fp16 there.
+        # Diagnostics so the user sees what they're working with
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            print(
+                f"[load] GPU={torch.cuda.get_device_name(0)} "
+                f"free={free / 1024**3:.2f} GiB / total={total / 1024**3:.2f} GiB "
+                f"bf16={torch.cuda.is_bf16_supported()}"
+            )
+        else:
+            print("[load] no CUDA device — model will load on CPU (very slow)")
+
+        # T4 (Turing) doesn't have bf16 hardware — fall back to fp16.
         compute_dtype = (
             "bfloat16"
             if (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
             else "float16"
         )
 
+        if device_map is None:
+            device_map = {"": 0} if torch.cuda.is_available() else "cpu"
+
         kwargs: dict = {"dtype": compute_dtype, "device_map": device_map}
+        if max_memory is not None:
+            kwargs["max_memory"] = max_memory
+
         if load_in_4bit:
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -200,13 +231,19 @@ class TransformersLLMClient:
                 bnb_4bit_compute_dtype=compute_dtype,
                 bnb_4bit_quant_type="nf4",
                 bnb_4bit_use_double_quant=True,
-                # Allow non-quantizable modules (vision tower, embeddings) to
-                # land on CPU when GPU is tight — required on T4 for E4B.
+                # Allows non-quantizable modules (vision tower, embeddings)
+                # to live on CPU if device_map decides to put them there.
                 llm_int8_enable_fp32_cpu_offload=True,
             )
         processor = AutoProcessor.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
         model.eval()
+        if torch.cuda.is_available():
+            free, total = torch.cuda.mem_get_info()
+            print(
+                f"[load] done. GPU free={free / 1024**3:.2f} GiB / "
+                f"total={total / 1024**3:.2f} GiB"
+            )
         return cls(model=model, processor=processor)
 
     def complete(
