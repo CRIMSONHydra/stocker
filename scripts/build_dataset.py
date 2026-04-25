@@ -82,12 +82,14 @@ def fetch_ohlcv(ticker: str, start: str, end: str) -> pd.DataFrame:
     df = yf.download(
         ticker, start=start, end=end, auto_adjust=False, progress=False
     )
-    if df.empty:
+    if df is None or df.empty:
         raise RuntimeError(f"yfinance returned empty for {ticker} {start}..{end}")
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
-    df.index = pd.to_datetime(df.index).tz_localize(None).normalize()
-    df = df[["Open", "High", "Low", "Close", "Volume"]]
+    idx = pd.DatetimeIndex(pd.to_datetime(df.index)).tz_localize(None)
+    idx = idx.normalize()  # type: ignore[attr-defined]
+    df.index = idx
+    df = df.loc[:, ["Open", "High", "Low", "Close", "Volume"]]
     df.columns = ["open", "high", "low", "close", "volume"]
     return df
 
@@ -97,38 +99,39 @@ def lookback_start(episode_start: str, days: int) -> str:
 
 
 def build_prices() -> pd.DataFrame:
-    rows = []
+    rows: list[dict] = []
     for task in TASKS:
         start = lookback_start(task["episode_start"], LOOKBACK_DAYS)
         end = (pd.to_datetime(task["episode_end"]) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         df = fetch_ohlcv(task["ticker"], start, end)
+        episode_start = pd.to_datetime(task["episode_start"])
+        episode_end = pd.to_datetime(task["episode_end"])
         for date, row in df.iterrows():
+            ts = pd.Timestamp(date)  # type: ignore[arg-type]
             rows.append({
                 "task_id": task["task_id"],
                 "ticker": task["ticker"],
-                "date": date.strftime("%Y-%m-%d"),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row["volume"]),
-                "in_episode": (
-                    pd.to_datetime(task["episode_start"])
-                    <= date
-                    <= pd.to_datetime(task["episode_end"])
-                ),
+                "date": ts.strftime("%Y-%m-%d"),
+                "open":   float(row["open"]),    # type: ignore[arg-type]
+                "high":   float(row["high"]),    # type: ignore[arg-type]
+                "low":    float(row["low"]),     # type: ignore[arg-type]
+                "close":  float(row["close"]),   # type: ignore[arg-type]
+                "volume": float(row["volume"]),  # type: ignore[arg-type]
+                "in_episode": episode_start <= ts <= episode_end,
             })
     return pd.DataFrame(rows)
 
 
 def build_indicators(prices: pd.DataFrame) -> pd.DataFrame:
     """Compute indicators per ticker on the full lookback+episode window."""
-    out_rows = []
+    out_rows: list[pd.DataFrame] = []
     for ticker, group in prices.groupby("ticker"):
-        df = group.sort_values("date").set_index(pd.to_datetime(group["date"]))
-        close = df["close"]
-        high = df["high"]
-        low = df["low"]
+        df = group.sort_values("date").set_index(
+            pd.to_datetime(group["date"])
+        )
+        close = pd.Series(df["close"].astype(float))
+        high = pd.Series(df["high"].astype(float))
+        low = pd.Series(df["low"].astype(float))
 
         ind = pd.DataFrame(index=df.index)
         ind["rsi14"] = ta.rsi(close, length=14)
@@ -147,10 +150,10 @@ def build_indicators(prices: pd.DataFrame) -> pd.DataFrame:
         ind["ticker"] = ticker
         ind["date"] = ind["date"].dt.strftime("%Y-%m-%d")
         out_rows.append(ind)
-    out = pd.concat(out_rows, ignore_index=True)
+    out: pd.DataFrame = pd.concat(out_rows, ignore_index=True)
     cols = ["ticker", "date", "rsi14", "macd", "macd_signal",
             "sma20", "sma50", "sma200", "bb_lower", "bb_upper", "atr14"]
-    return out[cols]
+    return out.loc[:, cols]
 
 
 def build_peers() -> pd.DataFrame:
@@ -232,8 +235,9 @@ def render_charts(prices: pd.DataFrame) -> int:
     for ticker, group in prices.groupby("ticker"):
         group = group.sort_values("date").reset_index(drop=True)
         group["date_dt"] = pd.to_datetime(group["date"])
-        for i, row in group.iterrows():
-            if not row["in_episode"]:
+        for raw_i, row in group.iterrows():
+            i = int(raw_i)  # type: ignore[arg-type]
+            if not bool(row["in_episode"]):
                 continue
             window_start_idx = max(0, i - 60)
             window = group.iloc[window_start_idx : i + 1].copy()

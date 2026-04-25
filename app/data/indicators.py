@@ -17,7 +17,7 @@ def rsi(close: pd.Series, length: int = 14) -> pd.Series:
     avg_gain = gain.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
     avg_loss = loss.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
     rs = avg_gain / avg_loss.replace(0, float("nan"))
-    return 100 - (100 / (1 + rs))
+    return pd.Series(100 - (100 / (1 + rs)), index=close.index, name="rsi")
 
 
 def macd(
@@ -33,7 +33,9 @@ def macd(
 
 
 def sma(close: pd.Series, length: int) -> pd.Series:
-    return close.rolling(length, min_periods=length).mean()
+    return pd.Series(
+        close.rolling(length, min_periods=length).mean(), index=close.index
+    )
 
 
 def bbands(close: pd.Series, length: int = 20, std: float = 2.0) -> pd.DataFrame:
@@ -55,4 +57,7 @@ def atr(
         ],
         axis=1,
     ).max(axis=1)
-    return tr.ewm(alpha=1 / length, adjust=False, min_periods=length).mean()
+    return pd.Series(
+        tr.ewm(alpha=1 / length, adjust=False, min_periods=length).mean(),
+        index=close.index,
+    )

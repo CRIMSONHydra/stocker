@@ -57,7 +57,9 @@ def macro() -> pd.DataFrame:
 def episode_rows(task_id: str) -> pd.DataFrame:
     """Episode prices for a task, sorted by date."""
     df = prices()
-    return df[(df["task_id"] == task_id) & df["in_episode"]].sort_values("date").reset_index(drop=True)
+    mask = (df["task_id"] == task_id) & df["in_episode"]
+    sub = df.loc[mask]
+    return sub.sort_values(by="date").reset_index(drop=True)
 
 
 def lookup_indicators(ticker: str, date: str) -> dict:

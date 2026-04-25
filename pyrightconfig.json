@@ -1,0 +1,9 @@
+{
+  "include": ["app", "scripts", "server", "tests", "training", "inference.py", "client.py"],
+  "exclude": ["**/__pycache__", "**/.venv", "**/.cache", "training/runs"],
+  "extraPaths": ["."],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportMissingTypeStubs": "none",
+  "pythonVersion": "3.12"
+}

@@ -180,17 +180,29 @@ class TransformersLLMClient:
         cls,
         model_id: str = "google/gemma-4-E4B-it",
         load_in_4bit: bool = True,
-        device_map: str = "auto",
+        device_map: Any = "auto",
     ) -> "TransformersLLMClient":
+        import torch
         from transformers import AutoModelForCausalLM, AutoProcessor
 
-        kwargs: dict = {"dtype": "auto", "device_map": device_map}
+        # T4 (Turing) doesn't have bf16 hardware — fall back to fp16 there.
+        compute_dtype = (
+            "bfloat16"
+            if (torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+            else "float16"
+        )
+
+        kwargs: dict = {"dtype": compute_dtype, "device_map": device_map}
         if load_in_4bit:
             from transformers import BitsAndBytesConfig
             kwargs["quantization_config"] = BitsAndBytesConfig(
                 load_in_4bit=True,
-                bnb_4bit_compute_dtype="bfloat16",
+                bnb_4bit_compute_dtype=compute_dtype,
                 bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                # Allow non-quantizable modules (vision tower, embeddings) to
+                # land on CPU when GPU is tight — required on T4 for E4B.
+                llm_int8_enable_fp32_cpu_offload=True,
             )
         processor = AutoProcessor.from_pretrained(model_id)
         model = AutoModelForCausalLM.from_pretrained(model_id, **kwargs)
@@ -244,6 +256,15 @@ class TransformersLLMClient:
     # ----------------------------------------------------------------- helpers
     @staticmethod
     def _prep_messages(messages: list[dict]) -> list[dict]:
+        """Normalize OpenAI-style messages for HF AutoProcessor chat templates.
+
+        Two transforms:
+        1. Plain string `content` is wrapped as `[{"type": "text", "text": ...}]`
+           because multimodal processors iterate `content` and break on strings.
+        2. `{"type": "image_url", "image_url": {"url": "data:image/..."}}` parts
+           are decoded back to PIL.Image objects in `{"type": "image", "image": img}`
+           form expected by Gemma's processor.
+        """
         import base64
         from io import BytesIO
 
@@ -252,6 +273,10 @@ class TransformersLLMClient:
         out = []
         for m in messages:
             content = m.get("content")
+            if isinstance(content, str):
+                # Plain string -> single text part
+                out.append({**m, "content": [{"type": "text", "text": content}]})
+                continue
             if isinstance(content, list):
                 new_parts = []
                 for part in content:
