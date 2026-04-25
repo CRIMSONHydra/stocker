@@ -1,0 +1,113 @@
+name: CI - Submission Validation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  validate:
+    name: Tests & Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install uv
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install -e .
+          uv pip install pytest pyyaml
+
+      - name: Run unit tests
+        run: |
+          source .venv/bin/activate
+          pytest tests/ -v
+
+      - name: Validate openenv.yaml
+        run: |
+          source .venv/bin/activate
+          python -c "
+          import yaml
+          with open('openenv.yaml') as f: spec = yaml.safe_load(f)
+          assert spec['name'] and spec['version'] and spec['entrypoint']
+          assert len(spec['tasks']) >= 3
+          assert 'observation_space' in spec and 'action_space' in spec
+          print(f'openenv.yaml OK: {spec[\"name\"]} v{spec[\"version\"]}')
+          "
+
+      - name: Validate Pydantic models
+        run: |
+          source .venv/bin/activate
+          python -c "
+          from app.models import (MarketObservation, TradeAction, StepResult,
+              ResetResult, EnvironmentState)
+          assert 'side' in TradeAction.model_fields
+          assert 'quantity' in TradeAction.model_fields
+          for f in ['ticker','date','price','price_history','cash','position','portfolio_value','task_id','step_number','total_steps']:
+              assert f in MarketObservation.model_fields, f'Missing: {f}'
+          print('models OK')
+          "
+
+      - name: Validate endpoints
+        run: |
+          source .venv/bin/activate
+          python -c "
+          from fastapi.testclient import TestClient
+          from app.main import app
+          c = TestClient(app)
+          assert c.post('/reset', json={}).status_code == 200
+          r = c.post('/step', json={'side': 'hold', 'quantity': 0})
+          assert r.status_code == 200 and -1.0 <= r.json()['reward'] <= 1.0
+          assert c.get('/state').status_code == 200
+          print('endpoints OK')
+          "
+
+      - name: Validate tasks
+        run: |
+          source .venv/bin/activate
+          python scripts/validate_tasks.py
+
+      - name: Verify inference.py structure
+        run: |
+          test -f inference.py
+          grep -q "from openai import OpenAI" inference.py
+          grep -q "API_BASE_URL" inference.py
+          grep -q "MODEL_NAME"    inference.py
+          grep -q "HF_TOKEN"      inference.py
+          grep -q '\[START\]'     inference.py
+          grep -q '\[STEP\]'      inference.py
+          grep -q '\[END\]'       inference.py
+
+      - name: Verify inference.py imports
+        run: |
+          source .venv/bin/activate
+          python inference.py --help
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t stocker:ci .
+      - name: Container /reset returns 200
+        run: |
+          docker run -d --name stocker-test -p 7860:7860 stocker:ci
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7860/health >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" -d '{}' http://localhost:7860/reset)
+          [ "$CODE" = "200" ] || exit 1
+          docker stop stocker-test && docker rm stocker-test

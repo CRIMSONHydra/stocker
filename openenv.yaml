@@ -1,0 +1,36 @@
+name: stocker
+version: 0.1.0
+description: >
+  An RL environment where an AI agent makes stock-trading decisions
+  (buy / sell / hold) over a sequence of market observations and is
+  rewarded for portfolio profit and risk-adjusted return.
+
+tasks:
+  - task_easy
+  - task_medium
+  - task_hard
+
+observation_space:
+  ticker: str
+  date: str
+  price: float
+  price_history: "list[float]"
+  fundamentals: dict
+  cash: float
+  position: int
+  portfolio_value: float
+  task_id: str
+  step_number: int
+  total_steps: int
+
+action_space:
+  side: "literal[buy, sell, hold]"
+  quantity: int
+
+entrypoint: app.core.environment:StockerEnv
+
+tags:
+  - openenv
+  - finance
+  - trading
+  - rl

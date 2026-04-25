@@ -1,0 +1,22 @@
+[project]
+name = "openenv-stocker"
+version = "0.1.0"
+description = "Stocker — a stock trading RL environment for OpenEnv"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.6.0",
+    "openai>=1.0.0",
+    "openenv-core>=0.2.0",
+]
+
+[project.scripts]
+server = "server.app:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[tool.uv]
+package = false
