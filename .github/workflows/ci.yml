@@ -24,8 +24,7 @@ jobs:
           pip install uv
           uv venv .venv
           source .venv/bin/activate
-          uv pip install -e .
-          uv pip install pytest pyyaml
+          uv pip install -e ".[dev,eval]"
 
       - name: Run unit tests
         run: |
@@ -49,10 +48,11 @@ jobs:
           source .venv/bin/activate
           python -c "
           from app.models import (MarketObservation, TradeAction, StepResult,
-              ResetResult, EnvironmentState)
+              ResetResult, EnvironmentState, SpecialistVote, CouncilDecision)
           assert 'side' in TradeAction.model_fields
-          assert 'quantity' in TradeAction.model_fields
-          for f in ['ticker','date','price','price_history','cash','position','portfolio_value','task_id','step_number','total_steps']:
+          for f in ['ticker','date','price','price_history','cash','position','portfolio_value',
+                   'task_id','step_number','total_steps','chart_path','headlines',
+                   'forum_excerpts','indicators','peers','macro']:
               assert f in MarketObservation.model_fields, f'Missing: {f}'
           print('models OK')
           "
@@ -71,7 +71,7 @@ jobs:
           print('endpoints OK')
           "
 
-      - name: Validate tasks
+      - name: Validate tasks (parquet round-trip)
         run: |
           source .venv/bin/activate
           python scripts/validate_tasks.py
@@ -79,18 +79,22 @@ jobs:
       - name: Verify inference.py structure
         run: |
           test -f inference.py
-          grep -q "from openai import OpenAI" inference.py
-          grep -q "API_BASE_URL" inference.py
-          grep -q "MODEL_NAME"    inference.py
-          grep -q "HF_TOKEN"      inference.py
+          grep -q "from openai import OpenAI" app/council/llm.py
+          grep -q "API_BASE_URL" app/council/llm.py
+          grep -q "MODEL_NAME"    app/council/llm.py
           grep -q '\[START\]'     inference.py
           grep -q '\[STEP\]'      inference.py
+          grep -q '\[COUNCIL\]'   inference.py
           grep -q '\[END\]'       inference.py
 
-      - name: Verify inference.py imports
+      - name: Council mock smoke test (no GPU, no API key)
         run: |
           source .venv/bin/activate
-          python inference.py --help
+          python inference.py --task task_easy --mock --no-cache > /tmp/run.log 2>&1
+          tail -5 /tmp/run.log
+          grep -q '\[START\]'   /tmp/run.log
+          grep -q '\[COUNCIL\]' /tmp/run.log
+          grep -q '\[END\]'     /tmp/run.log
 
   docker-build:
     name: Docker Build

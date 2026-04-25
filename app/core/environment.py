@@ -1,9 +1,11 @@
-"""StockerEnv — the Stocker OpenEnv environment."""
+"""StockerEnv — backtest RL environment over a single ticker."""
+from __future__ import annotations
 
 import uuid
 
 from app.core.graders import compute_step_reward, compute_trajectory_bonus
 from app.core.tasks import get_task_definition
+from app.data import loader
 from app.models import (
     EnvironmentState,
     MarketObservation,
@@ -14,11 +16,17 @@ from app.models import (
 
 
 class StockerEnv:
-    """Stock-trading RL environment."""
+    """Single-ticker backtest environment.
+
+    Observation includes both portfolio state (cash, position) and council
+    inputs (headlines, forum excerpts, indicators, peers, macro, chart path).
+    The action remains (side, quantity).
+    """
 
     def __init__(self, task_id: str = "task_easy"):
         self.task_id = task_id
         self._task: dict = {}
+        self._dates: list[str] = []
         self._prices: list[float] = []
         self._current_index: int = 0
         self._done: bool = True
@@ -34,10 +42,11 @@ class StockerEnv:
             self.task_id = task_id
 
         self._task = get_task_definition(self.task_id)
+        self._dates = self._task["dates"]
         self._prices = list(self._task["prices"])
         self._current_index = 0
         self._done = False
-        self._cash = float(self._task.get("starting_cash", 10000.0))
+        self._cash = float(self._task["starting_cash"])
         self._position = 0
         self._action_history = []
         self._reward_history = []
@@ -84,7 +93,7 @@ class StockerEnv:
             action=action,
             prev_portfolio=prev_portfolio,
             new_portfolio=new_portfolio,
-            starting_cash=float(self._task.get("starting_cash", 10000.0)),
+            starting_cash=float(self._task["starting_cash"]),
             invalid=invalid,
         )
         reward = result.score
@@ -97,14 +106,18 @@ class StockerEnv:
             self._done = True
             final_price = self._prices[-1]
             final_portfolio = self._cash + self._position * final_price
+            buy_and_hold = self._buy_and_hold_value()
             reward += compute_trajectory_bonus(
-                final_portfolio, float(self._task.get("starting_cash", 10000.0))
+                final_portfolio=final_portfolio,
+                buy_and_hold_value=buy_and_hold,
+                starting_cash=float(self._task["starting_cash"]),
             )
 
         reward = max(-1.0, min(1.0, reward))
 
         next_obs = (
-            self._terminal_observation() if self._done
+            self._terminal_observation()
+            if self._done
             else self._build_observation(self._current_index)
         )
 
@@ -142,6 +155,7 @@ class StockerEnv:
 
     def load_snapshot(self, snapshot: EnvironmentState) -> None:
         self._task = get_task_definition(snapshot.task_id)
+        self._dates = self._task["dates"]
         self._prices = list(self._task["prices"])
         self._current_index = snapshot.current_step
         self._done = snapshot.done
@@ -152,8 +166,7 @@ class StockerEnv:
 
     # ---------------------------------------------------------------- helpers
     def _apply_action(self, action: TradeAction, price: float) -> bool:
-        """Apply trade. Returns True if the action was invalid (insufficient
-        cash/position) — the action is then treated as a hold."""
+        """Apply trade. Returns True if invalid (insufficient cash/position)."""
         if action.side == "hold" or action.quantity <= 0:
             return False
 
@@ -174,11 +187,25 @@ class StockerEnv:
 
         return True
 
+    def _buy_and_hold_value(self) -> float:
+        """Hypothetical portfolio if the agent bought as many shares as
+        possible on day 1 with starting cash and held to the end."""
+        if not self._prices:
+            return 0.0
+        starting = float(self._task["starting_cash"])
+        first_price = self._prices[0]
+        shares = int(starting // first_price)
+        leftover = starting - shares * first_price
+        return leftover + shares * self._prices[-1]
+
     def _build_observation(self, index: int) -> MarketObservation:
+        ticker = self._task["ticker"]
+        date = self._dates[index]
         price = self._prices[index]
+
         return MarketObservation(
-            ticker=self._task["ticker"],
-            date=f"day_{index + 1}",
+            ticker=ticker,
+            date=date,
             price=price,
             price_history=self._prices[: index + 1],
             fundamentals=self._task.get("fundamentals", {}),
@@ -188,13 +215,21 @@ class StockerEnv:
             task_id=self.task_id,
             step_number=index + 1,
             total_steps=len(self._prices),
+            chart_path=loader.chart_path(ticker, date),
+            headlines=loader.lookup_headlines(ticker, date),
+            forum_excerpts=loader.lookup_forum_excerpts(ticker, date),
+            indicators=loader.lookup_indicators(ticker, date),
+            peers=loader.lookup_peers(ticker, date),
+            macro=loader.lookup_macro(date),
         )
 
     def _terminal_observation(self) -> MarketObservation:
         final_price = self._prices[-1] if self._prices else 0.0
+        last_date = self._dates[-1] if self._dates else ""
+        ticker = self._task.get("ticker", "")
         portfolio = self._cash + self._position * final_price
         return MarketObservation(
-            ticker=self._task.get("ticker", ""),
+            ticker=ticker,
             date="[EPISODE COMPLETE]",
             price=final_price,
             price_history=self._prices,
@@ -205,4 +240,10 @@ class StockerEnv:
             task_id=self.task_id,
             step_number=len(self._prices),
             total_steps=len(self._prices),
+            chart_path=loader.chart_path(ticker, last_date) if ticker else "",
+            headlines=[],
+            forum_excerpts=[],
+            indicators={},
+            peers={},
+            macro=[],
         )

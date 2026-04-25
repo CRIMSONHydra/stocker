@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class MarketObservation(BaseModel):
-    """What the agent sees: market state plus its current portfolio."""
+    """What the agent (council) sees on each step."""
     ticker: str
     date: str
     price: float
@@ -19,22 +19,43 @@ class MarketObservation(BaseModel):
     step_number: int
     total_steps: int
 
+    # Council inputs (added in step 2 of the multi-agent rebuild)
+    chart_path: str = ""
+    headlines: list[dict] = Field(default_factory=list)
+    forum_excerpts: list[dict] = Field(default_factory=list)
+    indicators: dict = Field(default_factory=dict)
+    peers: dict = Field(default_factory=dict)
+    macro: list[dict] = Field(default_factory=list)
+
 
 class TradeAction(BaseModel):
-    """What the agent does: buy / sell / hold a quantity of shares."""
+    """What the council emits each step."""
     side: Literal["buy", "sell", "hold"]
     quantity: int = Field(ge=0, default=0)
 
 
+class SpecialistVote(BaseModel):
+    """One specialist's read of the situation."""
+    name: str
+    signal: float = Field(ge=-1.0, le=1.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    rationale: str
+
+
+class CouncilDecision(BaseModel):
+    """The moderator's merged output for one step."""
+    votes: list[SpecialistVote]
+    action: TradeAction
+    rationale: str
+
+
 class RewardResult(BaseModel):
-    """Internal reward computation result."""
     score: float
     breakdown: dict[str, float]
     feedback: str
 
 
 class EnvironmentState(BaseModel):
-    """Snapshot of environment state."""
     task_id: str
     current_step: int
     total_steps: int

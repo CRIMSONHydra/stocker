@@ -1,0 +1,14 @@
+[
+  {"date": "2022-09-13", "country": "US", "headline": "August CPI prints hotter than expected at 8.3% YoY", "policy_signal": "hawkish"},
+  {"date": "2022-09-21", "country": "US", "headline": "Fed hikes rates 75bps, signals more aggressive path", "policy_signal": "hawkish"},
+  {"date": "2022-10-13", "country": "US", "headline": "September core CPI hits 40-year high at 6.6% YoY", "policy_signal": "hawkish"},
+  {"date": "2022-10-28", "country": "US", "headline": "Q3 GDP rebounds to 2.6% but consumer spending softens", "policy_signal": "neutral"},
+  {"date": "2023-08-02", "country": "US", "headline": "Fitch downgrades US sovereign rating from AAA to AA+", "policy_signal": "negative"},
+  {"date": "2023-08-10", "country": "US", "headline": "July CPI cools to 3.2%, supports Fed pause narrative", "policy_signal": "dovish"},
+  {"date": "2023-08-25", "country": "US", "headline": "Powell at Jackson Hole: Fed prepared to hike further if needed", "policy_signal": "hawkish"},
+  {"date": "2023-09-20", "country": "US", "headline": "FOMC holds rates steady, dot plot signals one more 2023 hike", "policy_signal": "hawkish"},
+  {"date": "2024-01-11", "country": "US", "headline": "December CPI ticks up to 3.4%, complicates rate-cut timing", "policy_signal": "hawkish"},
+  {"date": "2024-01-31", "country": "US", "headline": "FOMC holds rates, Powell says March cut unlikely", "policy_signal": "hawkish"},
+  {"date": "2024-02-13", "country": "US", "headline": "January CPI prints 3.1%, hotter than expected", "policy_signal": "hawkish"},
+  {"date": "2024-02-29", "country": "US", "headline": "Q4 GDP revised to 3.2%, consumer spending strong", "policy_signal": "neutral"}
+]

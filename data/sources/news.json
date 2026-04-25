@@ -1,0 +1,42 @@
+[
+  {
+    "ticker": "AAPL",
+    "items": [
+      {"date": "2023-08-03", "headline": "Apple beats Q3 earnings expectations on services growth", "source": "Reuters", "sentiment_label": "positive"},
+      {"date": "2023-08-04", "headline": "Apple shares dip on iPhone sales miss in China", "source": "WSJ", "sentiment_label": "negative"},
+      {"date": "2023-08-08", "headline": "Apple unveils new accessibility features ahead of iPhone 15 launch", "source": "TechCrunch", "sentiment_label": "neutral"},
+      {"date": "2023-08-15", "headline": "Apple supplier TSMC expects strong A17 chip orders", "source": "Bloomberg", "sentiment_label": "positive"},
+      {"date": "2023-08-22", "headline": "Apple Vision Pro production reportedly cut, raising launch concerns", "source": "FT", "sentiment_label": "negative"},
+      {"date": "2023-09-12", "headline": "Apple announces iPhone 15 lineup at Wonderlust event", "source": "Apple PR", "sentiment_label": "positive"},
+      {"date": "2023-09-13", "headline": "Analysts call iPhone 15 pricing aggressive in tough macro", "source": "CNBC", "sentiment_label": "neutral"},
+      {"date": "2023-09-22", "headline": "Apple sees strong iPhone 15 Pro demand in pre-orders", "source": "Reuters", "sentiment_label": "positive"},
+      {"date": "2023-09-28", "headline": "Apple addresses iPhone 15 overheating reports with iOS update", "source": "Verge", "sentiment_label": "neutral"}
+    ]
+  },
+  {
+    "ticker": "INTC",
+    "items": [
+      {"date": "2024-01-08", "headline": "Intel unveils new Core Ultra chips at CES targeting AI PC market", "source": "Reuters", "sentiment_label": "positive"},
+      {"date": "2024-01-25", "headline": "Intel Q4 beats on top line but Q1 guidance disappoints", "source": "WSJ", "sentiment_label": "negative"},
+      {"date": "2024-01-26", "headline": "Intel shares plunge after weak data center forecast", "source": "Bloomberg", "sentiment_label": "negative"},
+      {"date": "2024-02-02", "headline": "Intel CFO sees foundry losses narrowing through 2024", "source": "FT", "sentiment_label": "neutral"},
+      {"date": "2024-02-12", "headline": "Intel awarded Pentagon chip contract worth $3.5B", "source": "DoD", "sentiment_label": "positive"},
+      {"date": "2024-02-21", "headline": "Intel Foundry Services event highlights 18A roadmap", "source": "AnandTech", "sentiment_label": "positive"},
+      {"date": "2024-02-23", "headline": "Analyst downgrades Intel citing AMD share gains", "source": "Barron's", "sentiment_label": "negative"}
+    ]
+  },
+  {
+    "ticker": "META",
+    "items": [
+      {"date": "2022-09-06", "headline": "Meta reportedly slowing hiring across most teams", "source": "WSJ", "sentiment_label": "negative"},
+      {"date": "2022-09-15", "headline": "Meta Reality Labs losses widen as VR investments continue", "source": "Reuters", "sentiment_label": "negative"},
+      {"date": "2022-09-22", "headline": "Meta unveils AI translation breakthroughs at research summit", "source": "Meta PR", "sentiment_label": "positive"},
+      {"date": "2022-09-29", "headline": "Meta announces Quest Pro headset with productivity focus", "source": "Verge", "sentiment_label": "neutral"},
+      {"date": "2022-10-06", "headline": "Meta shares hit multi-year low on ad spending concerns", "source": "Bloomberg", "sentiment_label": "negative"},
+      {"date": "2022-10-19", "headline": "Meta Reels engagement surpasses TikTok in latest data", "source": "FT", "sentiment_label": "positive"},
+      {"date": "2022-10-26", "headline": "Meta Q3 misses on EPS, Reality Labs loss balloons to $3.7B", "source": "CNBC", "sentiment_label": "negative"},
+      {"date": "2022-10-27", "headline": "Meta shares plunge 24% premarket on weak guidance and capex spike", "source": "Reuters", "sentiment_label": "negative"},
+      {"date": "2022-10-31", "headline": "Activist investor calls on Meta to slash spending", "source": "WSJ", "sentiment_label": "neutral"}
+    ]
+  }
+]

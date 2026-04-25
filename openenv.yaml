@@ -1,9 +1,12 @@
 name: stocker
 version: 0.1.0
 description: >
-  An RL environment where an AI agent makes stock-trading decisions
-  (buy / sell / hold) over a sequence of market observations and is
-  rewarded for portfolio profit and risk-adjusted return.
+  A stock-trading RL environment built on OpenEnv. Long-term backtest over
+  3 historical episodes (AAPL, INTC, META). Per-step decisions are produced
+  by a council of 7 LLM specialist agents (chart, seasonal/long-term, technical
+  indicators, news, forum sentiment, peers + commodity, geopolitics/macro)
+  whose votes are merged by a moderator LLM. The moderator is GRPO-trained
+  via TRL on top of google/gemma-4-E4B-it.
 
 tasks:
   - task_easy
@@ -22,6 +25,12 @@ observation_space:
   task_id: str
   step_number: int
   total_steps: int
+  chart_path: str
+  headlines: "list[dict]"
+  forum_excerpts: "list[dict]"
+  indicators: dict
+  peers: dict
+  macro: "list[dict]"
 
 action_space:
   side: "literal[buy, sell, hold]"
@@ -33,4 +42,5 @@ tags:
   - openenv
   - finance
   - trading
+  - multi-agent
   - rl

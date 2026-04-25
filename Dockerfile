@@ -7,14 +7,13 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml ./
-RUN if [ -f uv.lock ]; then \
-        uv export --no-dev --no-hashes > requirements.txt; \
-    else \
-        uv pip compile pyproject.toml -o requirements.txt; \
-    fi && \
+RUN uv pip compile pyproject.toml -o requirements.txt && \
     pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY app/ /app/app/
+COPY server/ /app/server/
+COPY data/ /app/data/
+COPY inference.py client.py /app/
 
 RUN adduser --disabled-password --gecos "" appuser && \
     chown -R appuser:appuser /app

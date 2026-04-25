@@ -1,0 +1,4 @@
+task_id,total_reward,final_portfolio,buy_and_hold,alpha_pct
+task_easy,0.1,10000.0,8755.6,14.21
+task_medium,0.1,10000.0,9007.25,11.02
+task_hard,0.1,10000.0,5668.0,76.43

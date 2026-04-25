@@ -1,0 +1,34 @@
+[
+  {
+    "ticker": "AAPL",
+    "items": [
+      {"date": "2023-08-04", "subreddit": "wallstreetbets", "score": 312, "post_text": "AAPL services revenue is the real story here, hardware is secondary. Long $200 calls."},
+      {"date": "2023-08-11", "subreddit": "stocks", "score": 88, "post_text": "iPhone 15 cycle looks weak compared to 14, China issue is real. Trimming."},
+      {"date": "2023-08-23", "subreddit": "investing", "score": 240, "post_text": "Vision Pro production cut means launch slips. Not the FY24 catalyst people expect."},
+      {"date": "2023-09-13", "subreddit": "wallstreetbets", "score": 1500, "post_text": "iPhone 15 Pro Max pre-orders are insane in my circle. Loaded calls."},
+      {"date": "2023-09-21", "subreddit": "stocks", "score": 410, "post_text": "Pre-order data looks bullish but supply constraints will pull demand into Q1."},
+      {"date": "2023-09-29", "subreddit": "investing", "score": 175, "post_text": "Overheating reports being overblown. Apple already shipping fix. Buying weakness."}
+    ]
+  },
+  {
+    "ticker": "INTC",
+    "items": [
+      {"date": "2024-01-09", "subreddit": "investing", "score": 220, "post_text": "Core Ultra is a real product. AI PC narrative could finally lift Intel multiple."},
+      {"date": "2024-01-26", "subreddit": "wallstreetbets", "score": 980, "post_text": "Intel guide was a disaster. Foundry is bleeding cash. Holding puts."},
+      {"date": "2024-02-13", "subreddit": "stocks", "score": 540, "post_text": "Pentagon contract is bullish for foundry credibility. Long-dated calls."},
+      {"date": "2024-02-22", "subreddit": "investing", "score": 320, "post_text": "18A roadmap looks credible if you trust Pat. Not for the impatient."},
+      {"date": "2024-02-26", "subreddit": "wallstreetbets", "score": 670, "post_text": "AMD eating Intel's lunch in server. Fundamentals don't justify rally."}
+    ]
+  },
+  {
+    "ticker": "META",
+    "items": [
+      {"date": "2022-09-08", "subreddit": "wallstreetbets", "score": 410, "post_text": "Meta hiring slowdown means cost discipline finally arriving. Bullish into Q3."},
+      {"date": "2022-09-16", "subreddit": "stocks", "score": 280, "post_text": "Reality Labs is a money pit. Zuckerberg has tunnel vision on metaverse."},
+      {"date": "2022-10-07", "subreddit": "investing", "score": 1120, "post_text": "Ad market is getting crushed by macro. Meta exposure is too high. Out."},
+      {"date": "2022-10-20", "subreddit": "stocks", "score": 360, "post_text": "Reels finally clicking. If monetization scales, ad miss is overdone."},
+      {"date": "2022-10-27", "subreddit": "wallstreetbets", "score": 4500, "post_text": "META getting destroyed -24% premarket. Capex guide is bonkers. Permabears vindicated."},
+      {"date": "2022-10-31", "subreddit": "investing", "score": 850, "post_text": "Activist pressure could force discipline. Risk/reward looks asymmetric down here."}
+    ]
+  }
+]

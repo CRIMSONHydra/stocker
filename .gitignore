@@ -1,14 +1,68 @@
+# --- Python ----------------------------------------------------------------
 __pycache__/
-*.pyc
-*.pyo
-.env
+*.py[cod]
+*.so
+*.pyd
 *.egg-info/
-dist/
+.eggs/
 build/
-.hypothesis/
+dist/
+pip-wheel-metadata/
+.installed.cfg
+
+# --- Virtualenvs / env -----------------------------------------------------
+.venv/
+venv/
+env/
+.python-version
+.env
+.env.*
+!.env.example
+
+# --- Tooling caches --------------------------------------------------------
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.log
-.venv/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+
+# --- Stocker runtime artifacts --------------------------------------------
+.cache/                       # council vote cache (specialist + moderator)
+training/runs/                # GRPO runs, eval rollouts, plots, LoRA adapters
+!training/runs/.gitkeep
 results.json
+*.log
+
+# --- Notebook noise --------------------------------------------------------
+.ipynb_checkpoints/
+*.ipynb_meta
+
+# --- Editors / IDEs --------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- OS junk ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local-only model / HF caches (in case anyone runs vLLM in-tree) ------
+hf_cache/
+models/
+*.safetensors
+*.gguf
+*.bin
+
+# --- Misc ------------------------------------------------------------------
+*.bak
+*.orig
+*.rej
+tmp/
