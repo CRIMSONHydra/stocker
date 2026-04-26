@@ -40,9 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-def build_prompt_dataset(use_mock_specialists: bool, cache: bool):
+def build_prompt_dataset(
+    use_mock_specialists: bool,
+    cache: bool,
+    task_ids: list[str] | None = None,
+):
     """Pre-compute specialist votes for every (task, step) and return a list
     of training rows: {task_id, step_index, prompt, env_snapshot}.
+
+    task_ids: subset of list_task_ids() to train on; None = all.
     """
     from app.council.llm import MockLLMClient, build_openai_client_from_env
     from app.council.runner import Council
@@ -54,8 +60,9 @@ def build_prompt_dataset(use_mock_specialists: bool, cache: bool):
     council = Council(client=client, use_cache=cache)
     moderator = Moderator(client)  # used only for prompt-building
 
+    active_tasks = task_ids if task_ids is not None else list_task_ids()
     rows = []
-    for task_id in list_task_ids():
+    for task_id in active_tasks:
         env = StockerEnv(task_id=task_id)
         obs = env.reset().observation
         # Snapshot state for replay during reward computation:
@@ -242,16 +249,22 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--mock-specialists", action="store_true",
                    help="Use MockLLMClient for the 7 specialists (testing only)")
+    p.add_argument("--tasks", default="all",
+                   help="Comma-separated task IDs to train on, or 'all' (default)")
     p.add_argument("--out", default=None)
     args = p.parse_args()
+
+    task_ids = None if args.tasks == "all" else [t.strip() for t in args.tasks.split(",")]
 
     run_id = datetime.utcnow().strftime("grpo_%Y%m%d_%H%M%S")
     run_dir = Path(args.out) if args.out else Path("training/runs") / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "args.json").write_text(json.dumps(vars(args), indent=2))
 
-    print(f"[1/3] Building moderator-prompt dataset ...")
-    dataset = build_prompt_dataset(use_mock_specialists=args.mock_specialists, cache=True)
+    print(f"[1/3] Building moderator-prompt dataset (tasks={args.tasks}) ...")
+    dataset = build_prompt_dataset(
+        use_mock_specialists=args.mock_specialists, cache=True, task_ids=task_ids
+    )
     (run_dir / "dataset.json").write_text(json.dumps(
         [{k: v for k, v in r.items() if k != "messages"} for r in dataset], indent=2
     ))
