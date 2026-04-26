@@ -20,7 +20,8 @@ WORKDIR /app
 
 # ─── Layer 1: OS packages ───────────────────────────────────────────────
 RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends git curl ca-certificates && \
+    apt-get install -y --no-install-recommends \
+        git curl ca-certificates python3-venv && \
     rm -rf /var/lib/apt/lists/*
 
 # ─── Layer 2: fresh venv (avoids PEP 668 in newer pytorch base images) ──
@@ -42,7 +43,9 @@ RUN pip install --no-cache-dir uv
 # index ships an old `requests` (2.28.1) that breaks datasets>=4.0
 # (needs requests>=2.32.2). With this flag, uv picks the right version
 # across both indexes. (Verified via uv pip install --dry-run locally.)
-RUN uv pip install --no-cache --index-strategy unsafe-best-match \
+# UV_HTTP_TIMEOUT=600 gives slow network 10 min per request before retry.
+ENV UV_HTTP_TIMEOUT=600
+RUN uv pip install --index-strategy unsafe-best-match \
     --extra-index-url https://download.pytorch.org/whl/cu126 \
     "fastapi" "uvicorn[standard]" "pydantic>=2.0" "pydantic-settings" \
     "openai" "openenv-core" "pandas" "pyarrow" "pillow" "markdown-it-py" \
