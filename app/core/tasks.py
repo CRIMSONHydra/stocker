@@ -1,13 +1,18 @@
 """Task definitions for Stocker.
 
-Tasks are loaded from data/prices.parquet (built by scripts/build_dataset.py).
-Each task is one ticker over one episode window. The 3 task IDs are kept
-stable so the OpenEnv contract doesn't change.
+Tasks come from two sources:
+  - The 3 stable, hand-curated tasks (task_easy/medium/hard) loaded from
+    data/prices.parquet (built by scripts/build_dataset.py).
+  - Optional corpus tasks (prefixed `corpus_`) loaded from
+    data/corpus/episodes.parquet (built by scripts/build_corpus.py).
+
+The 3 stable IDs are kept so the OpenEnv contract doesn't change.
 """
 from __future__ import annotations
 
 import logging
 
+from app.core import corpus_tasks
 from app.data import loader
 
 logger = logging.getLogger(__name__)
@@ -45,13 +50,16 @@ TASK_META = {
 
 
 def list_task_ids() -> list[str]:
-    return list(TASK_META.keys())
+    """All available task IDs — 3 curated tasks plus any corpus tasks present."""
+    return list(TASK_META.keys()) + corpus_tasks.list_corpus_task_ids()
 
 
 def get_task_definition(task_id: str) -> dict:
+    if corpus_tasks.is_corpus_task(task_id):
+        return corpus_tasks.get_corpus_task_definition(task_id)
     if task_id not in TASK_META:
         raise KeyError(
-            f"Unknown task_id: {task_id}. Available: {list(TASK_META.keys())}"
+            f"Unknown task_id: {task_id}. Available: {list_task_ids()}"
         )
     meta = TASK_META[task_id]
     rows = loader.episode_rows(task_id)

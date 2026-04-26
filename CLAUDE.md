@@ -32,9 +32,10 @@ via TRL on top of `google/gemma-4-E4B-it`.
 │   ├── main.py
 │   └── models.py           # Pydantic schemas (the public OpenEnv contract)
 ├── data/                   # bundled by scripts/build_dataset.py
-│   ├── *.parquet
-│   ├── charts/             # 768x768 candlestick PNGs
-│   └── sources/            # curated news / forums / macro JSON
+│   ├── *.parquet           # the 3-task bundle (committed)
+│   ├── charts/             # 768x768 candlestick PNGs (cache/ on-the-fly, gitignored)
+│   ├── sources/            # curated news / forums / macro JSON
+│   └── corpus/             # 15-ticker × 20y corpus (built by scripts/build_corpus.py, gitignored)
 ├── server/app.py           # OpenEnv entry point (`server.app:main`)
 ├── inference.py            # council-driven OpenEnv inference loop (root)
 ├── client.py
@@ -70,6 +71,15 @@ via TRL on top of `google/gemma-4-E4B-it`.
 - Tests use `MockLLMClient` — never `HF_TOKEN` in CI. The mock routes by
   system-prompt keyword, so changing role keywords requires updating
   `MockLLMClient.SIGNAL_BIAS`.
+- Two task tiers: the 3 stable IDs (`task_easy/medium/hard`) come from
+  `data/*.parquet`; corpus tasks (prefixed `corpus_`) come from
+  `data/corpus/episodes.parquet`. Both flow through the same
+  `app.core.tasks.get_task_definition`. Corpus is *optional* — `list_task_ids()`
+  silently returns just the 3 if `data/corpus/` is missing. Build it with
+  `python scripts/build_corpus.py` (use `--quick` for a 3-ticker × 5y smoke).
+- Charts are rendered on-the-fly from corpus prices when a (ticker, date)
+  isn't in the pre-rendered bundle — see [app/data/corpus.py](app/data/corpus.py)
+  `render_chart_cached`. Cache lives in `data/charts/cache/` (gitignored).
 
 ## Don't
 

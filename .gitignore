@@ -38,6 +38,11 @@ training/runs/                # GRPO runs, eval rollouts, plots, LoRA adapters
 results.json
 *.log
 
+# Corpus is built locally — too large for git; the original bundled
+# 3-task dataset (data/*.parquet, data/charts/*.png) IS committed.
+data/corpus/
+data/charts/cache/
+
 # --- Notebook noise --------------------------------------------------------
 .ipynb_checkpoints/
 *.ipynb_meta

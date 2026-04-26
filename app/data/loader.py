@@ -66,6 +66,12 @@ def lookup_indicators(ticker: str, date: str) -> dict:
     df = indicators()
     row = df[(df["ticker"] == ticker) & (df["date"] == date)]
     if row.empty:
+        try:
+            from app.data import corpus
+            if corpus.available():
+                return corpus.lookup_indicators(ticker, date)
+        except Exception:
+            pass
         return {}
     rec = row.iloc[0].to_dict()
     rec.pop("ticker", None)
@@ -74,19 +80,32 @@ def lookup_indicators(ticker: str, date: str) -> dict:
 
 
 def lookup_headlines(ticker: str, date: str, lookback_days: int = 7) -> list[dict]:
-    """Return headlines from the past `lookback_days` for this ticker."""
+    """Return headlines from the past `lookback_days` for this ticker.
+
+    Pulls from the curated `news.parquet` first; if nothing is found there,
+    falls back to the EDGAR + RSS stream in the corpus (decades-deep).
+    """
     df = news()
     df = df[df["ticker"] == ticker].copy()
-    if df.empty:
-        return []
-    df["date"] = pd.to_datetime(df["date"])
-    cutoff_lo = pd.to_datetime(date) - pd.Timedelta(days=lookback_days)
-    cutoff_hi = pd.to_datetime(date)
-    sl = df[(df["date"] >= cutoff_lo) & (df["date"] <= cutoff_hi)]
-    return [
-        {"date": d.strftime("%Y-%m-%d"), "headline": h, "source": s, "sentiment_label": sl_}
-        for d, h, s, sl_ in zip(sl["date"], sl["headline"], sl["source"], sl["sentiment_label"])
-    ]
+    bundled: list[dict] = []
+    if not df.empty:
+        df["date"] = pd.to_datetime(df["date"])
+        cutoff_lo = pd.to_datetime(date) - pd.Timedelta(days=lookback_days)
+        cutoff_hi = pd.to_datetime(date)
+        sl = df[(df["date"] >= cutoff_lo) & (df["date"] <= cutoff_hi)]
+        bundled = [
+            {"date": d.strftime("%Y-%m-%d"), "headline": h, "source": s, "sentiment_label": sl_}
+            for d, h, s, sl_ in zip(sl["date"], sl["headline"], sl["source"], sl["sentiment_label"])
+        ]
+    if bundled:
+        return bundled
+    try:
+        from app.data import corpus
+        if corpus.available():
+            return corpus.lookup_headlines(ticker, date, lookback_days=lookback_days)
+    except Exception:
+        pass
+    return []
 
 
 def lookup_forum_excerpts(ticker: str, date: str, lookback_days: int = 7) -> list[dict]:
@@ -134,5 +153,21 @@ def lookup_macro(date: str, lookback_days: int = 14) -> list[dict]:
 
 
 def chart_path(ticker: str, date: str) -> str:
+    """Return chart PNG path for (ticker, date), rendering on-demand if needed.
+
+    Resolution order:
+      1. Pre-rendered bundle: data/charts/{ticker}_{date}.png
+      2. On-demand cache:     data/charts/cache/{ticker}_{date}.png (rendered
+                              from corpus prices the first time it's asked)
+      3. ""                   if we don't have prices for that ticker/date
+    """
     p = CHARTS_DIR / f"{ticker}_{date}.png"
-    return str(p) if p.exists() else ""
+    if p.exists():
+        return str(p)
+    try:
+        from app.data import corpus
+        if corpus.available():
+            return corpus.render_chart_cached(ticker, date)
+    except Exception:
+        pass
+    return ""
