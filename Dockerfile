@@ -22,7 +22,7 @@ RUN uv pip compile pyproject.toml -o requirements.txt && \
 COPY app/ /app/app/
 COPY server/ /app/server/
 COPY data/ /app/data/
-COPY inference.py client.py /app/
+COPY inference.py client.py README.md /app/
 
 # Pull in the built frontend so FastAPI mounts the React SPA at /web
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist

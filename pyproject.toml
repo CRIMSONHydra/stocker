@@ -17,6 +17,7 @@ dependencies = [
     "pandas>=2.0.0",
     "pyarrow>=14.0.0",
     "pillow>=10.0.0",
+    "markdown-it-py>=3.0.0",
 ]
 
 [project.scripts]

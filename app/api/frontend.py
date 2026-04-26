@@ -1,27 +1,101 @@
-"""Serves the embedded HTML frontend.
+"""Frontend routes.
 
-When a built React SPA exists at ``frontend/dist/index.html``, that is served at
-``/`` and ``/web``. Otherwise the inline HTML below is served as a fallback so
-the API is usable without Node tooling (and so tests do not require a build).
+- ``/``    — the README rendered as a blog-style landing page (judges read first)
+- ``/web`` — the React SPA (or inline HTML fallback if no built dist)
+- ``/blog`` — alias of ``/``
 """
 
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, HTMLResponse
+from markdown_it import MarkdownIt
 
 router = APIRouter(tags=["frontend"])
 
-DIST_INDEX = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
+ROOT = Path(__file__).resolve().parents[2]
+DIST_INDEX = ROOT / "frontend" / "dist" / "index.html"
+README_PATH = ROOT / "README.md"
+
+
+def _strip_frontmatter(text: str) -> str:
+    if text.startswith("---\n"):
+        end = text.find("\n---\n", 4)
+        if end != -1:
+            return text[end + 5:].lstrip()
+    return text
+
+
+def _render_readme() -> str:
+    if not README_PATH.is_file():
+        return "<p><em>README.md not bundled in this image.</em></p>"
+    md_text = _strip_frontmatter(README_PATH.read_text(encoding="utf-8"))
+    md = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+    return md.render(md_text)
+
+
+BLOG_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Stocker — Multi-Agent Council RL for Stock Trading</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: #0f172a; color: #e2e8f0; margin: 0; line-height: 1.7; }}
+    .nav {{ background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(8px); border-bottom: 1px solid #334155; padding: 14px 24px; position: sticky; top: 0; z-index: 100; }}
+    .nav-inner {{ max-width: 920px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }}
+    .nav-title {{ font-weight: 700; color: #38bdf8; font-size: 1.05em; }}
+    .nav-links a {{ color: #94a3b8; text-decoration: none; margin-left: 20px; font-size: 0.9em; transition: color 0.15s; }}
+    .nav-links a:hover {{ color: #e2e8f0; }}
+    .nav-links a.cta {{ background: #2563eb; color: white; padding: 7px 16px; border-radius: 8px; font-weight: 600; }}
+    .nav-links a.cta:hover {{ background: #1d4ed8; color: white; }}
+    article {{ max-width: 880px; margin: 0 auto; padding: 32px 24px 80px; }}
+    article h1 {{ color: #38bdf8; font-size: 2.2em; margin: 0 0 0.5em; line-height: 1.2; }}
+    article h2 {{ color: #38bdf8; margin: 1.6em 0 0.5em; border-top: 1px solid #1e293b; padding-top: 1em; font-size: 1.55em; }}
+    article h3 {{ color: #cbd5e1; margin: 1.4em 0 0.4em; font-size: 1.2em; }}
+    article a {{ color: #38bdf8; }}
+    article a:hover {{ text-decoration: underline; }}
+    article code {{ background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; color: #fbbf24; }}
+    article pre {{ background: #1e293b; padding: 16px; border-radius: 8px; overflow-x: auto; border: 1px solid #334155; }}
+    article pre code {{ background: transparent; padding: 0; color: #e2e8f0; }}
+    article table {{ border-collapse: collapse; margin: 1em 0; width: 100%; font-size: 0.9em; }}
+    article th, article td {{ border: 1px solid #334155; padding: 8px 12px; text-align: left; }}
+    article th {{ background: #1e293b; color: #38bdf8; }}
+    article img {{ max-width: 100%; border-radius: 8px; margin: 1em 0; }}
+    article blockquote {{ border-left: 3px solid #38bdf8; margin: 1em 0; padding: 12px 16px; background: #1e293b; border-radius: 4px; color: #cbd5e1; }}
+    article blockquote p {{ margin: 0.4em 0; }}
+    article ul, article ol {{ padding-left: 24px; }}
+    article hr {{ border: none; border-top: 1px solid #334155; margin: 2em 0; }}
+    .demo-cta {{ display: inline-block; background: #2563eb; color: white !important; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: 600; margin: 16px 0; transition: background 0.15s; }}
+    .demo-cta:hover {{ background: #1d4ed8; }}
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="nav-inner">
+      <span class="nav-title">⚡ Stocker</span>
+      <span class="nav-links">
+        <a href="/">Methodology</a>
+        <a href="https://github.com/CRIMSONHydra/stocker" target="_blank" rel="noopener">GitHub</a>
+        <a href="/web" class="cta">🚀 Live Demo</a>
+      </span>
+    </div>
+  </nav>
+  <article>{readme}</article>
+</body>
+</html>"""
+
 
 FRONTEND_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Stocker - OpenEnv</title>
+<title>Stocker - OpenEnv (demo)</title>
 <style>
   body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
   .container { max-width: 900px; margin: 0 auto; }
+  .back { color: #38bdf8; text-decoration: none; font-size: 0.9em; }
   h1 { color: #38bdf8; }
   .card { background: #1e293b; border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid #334155; }
   label { display: block; color: #94a3b8; font-size: 0.85em; margin: 8px 0 4px; }
@@ -38,7 +112,8 @@ FRONTEND_HTML = """<!DOCTYPE html>
 </head>
 <body>
 <div class="container">
-  <h1>Stocker</h1>
+  <a href="/" class="back">← Back to methodology</a>
+  <h1>Stocker — Live Demo</h1>
   <p>OpenEnv RL environment for stock-trading decisions.</p>
 
   <div class="card">
@@ -128,9 +203,14 @@ async function submit() {
 </html>"""
 
 
-@router.get("/")
+@router.get("/", response_class=HTMLResponse)
+@router.get("/blog", response_class=HTMLResponse)
+async def landing_blog():
+    return HTMLResponse(content=BLOG_HTML.format(readme=_render_readme()))
+
+
 @router.get("/web")
-async def index():
+async def demo():
     if DIST_INDEX.is_file():
         return FileResponse(DIST_INDEX)
     return HTMLResponse(content=FRONTEND_HTML)
