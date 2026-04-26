@@ -45,6 +45,8 @@ train = [
     "bitsandbytes>=0.43.0",
     "datasets>=3.0.0",
     "tensorboard>=2.18.0",
+    # PEFT >=0.13 probes torchao at LoRA-injection time and rejects <0.16
+    "torchao>=0.16.0",
 ]
 
 [tool.setuptools]

@@ -147,6 +147,21 @@ def run_grpo(args, run_dir: Path, dataset):
         task_type="CAUSAL_LM",
     )
 
+    # TRL ≥0.13 enforces:
+    #   generation_batch_size (= per_device_train_batch_size * grad_accum * num_proc)
+    #   must be divisible by num_generations
+    # We require the user to pass batch_size that satisfies that.
+    if (args.batch_size * args.grad_accum) % args.num_generations != 0:
+        raise SystemExit(
+            f"per_device_train_batch_size ({args.batch_size}) * grad_accum "
+            f"({args.grad_accum}) = {args.batch_size * args.grad_accum} must be "
+            f"divisible by num_generations ({args.num_generations}). "
+            f"Try --batch-size {args.num_generations} or --num-generations "
+            f"{args.batch_size * args.grad_accum}."
+        )
+
+    # max_prompt_length / max_completion_length were renamed/removed in
+    # newer TRL — let TRL pick its own defaults instead of hard-coding.
     grpo_cfg = GRPOConfig(
         output_dir=str(run_dir),
         per_device_train_batch_size=args.batch_size,
@@ -154,12 +169,11 @@ def run_grpo(args, run_dir: Path, dataset):
         learning_rate=args.lr,
         num_train_epochs=args.epochs,
         num_generations=args.num_generations,
-        max_prompt_length=2048,
-        max_completion_length=192,
         logging_dir=str(run_dir / "tensorboard"),
         report_to=["tensorboard"],
         save_strategy="epoch",
-        bf16=torch.cuda.is_available(),
+        bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
         seed=args.seed,
     )
 
@@ -219,8 +233,10 @@ def main():
     p.add_argument("--model", default=os.getenv("MODEL_NAME", "google/gemma-4-E4B-it"))
     p.add_argument("--lora-rank", type=int, default=16)
     p.add_argument("--num-generations", type=int, default=8)
-    p.add_argument("--batch-size", type=int, default=2)
-    p.add_argument("--grad-accum", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=8,
+                   help="per_device batch (must satisfy "
+                        "(batch * grad_accum) %% num_generations == 0)")
+    p.add_argument("--grad-accum", type=int, default=1)
     p.add_argument("--epochs", type=int, default=2)
     p.add_argument("--lr", type=float, default=5e-6)
     p.add_argument("--seed", type=int, default=42)
