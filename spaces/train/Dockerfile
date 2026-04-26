@@ -17,7 +17,7 @@
 #   7. dataset build       (~30s)
 # Normal git push triggers only steps 5-7 (~45s total).
 
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
