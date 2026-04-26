@@ -77,3 +77,4 @@ models/
 *.orig
 *.rej
 tmp/
+.vite/
