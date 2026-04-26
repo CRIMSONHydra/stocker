@@ -1,10 +1,14 @@
-"""Gradio training UI for Stocker GRPO on HF Spaces GPU.
+"""Training Space UI — minimal FastAPI + HTML.
 
-Deploy as a Space with hardware "Nvidia L4" (24 GB).
-Required secrets (set in Space Settings → Variables and secrets):
-  HF_TOKEN      — read/write access for uploading results
-  API_BASE_URL  — https://at0e6z2u64774tc7.us-east-1.aws.endpoints.huggingface.cloud/v1
+Avoids Gradio because gradio<5 pulls gradio-client==1.3.0 which constrains
+websockets<13, conflicting with openenv-core's websockets>=15.0.1.
+
+Required Space secrets (Settings → Variables and secrets):
+  HF_TOKEN      — write-access token for uploading results
+  API_BASE_URL  — https://<endpoint>.endpoints.huggingface.cloud/v1
   MODEL_NAME    — ggml-org/gemma-4-26B-A4B-it-GGUF
+  RESULTS_REPO  — Hydr473/stocker-results  (defaults to this if unset)
+  USE_MOCK_SPECIALISTS=1  — fall back to MockLLMClient (skip endpoint calls)
 """
 from __future__ import annotations
 
@@ -13,22 +17,23 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 
-import gradio as gr
+import uvicorn
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from huggingface_hub import HfApi
 
-WORKDIR = Path(__file__).resolve().parent.parent.parent  # repo root
+WORKDIR = Path(__file__).resolve().parent.parent.parent
 LOG_PATH = Path("/tmp/stocker_train.log")
 RESULTS_REPO = os.getenv("RESULTS_REPO", "Hydr473/stocker-results")
 
-_state: dict = {"phase": "idle", "proc": None}
+_state: dict = {"phase": "idle"}
 
 
 def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> None:
     env = {**os.environ, **(env_extra or {})}
-    _state["proc"] = subprocess.Popen(
+    proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -37,29 +42,24 @@ def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> None:
         env=env,
     )
     with open(LOG_PATH, "a") as lf:
-        assert _state["proc"] and _state["proc"].stdout
-        for line in _state["proc"].stdout:
+        assert proc.stdout
+        for line in proc.stdout:
             lf.write(line)
             lf.flush()
-    _state["proc"].wait()
+    proc.wait()
 
 
 def _run_pipeline() -> None:
-    LOG_PATH.write_text("")  # clear log
+    LOG_PATH.write_text("")
     endpoint_env = {
         "API_BASE_URL": os.getenv("API_BASE_URL", ""),
         "MODEL_NAME":   os.getenv("MODEL_NAME", ""),
         "HF_TOKEN":     os.getenv("HF_TOKEN", ""),
     }
-    # Set USE_MOCK_SPECIALISTS=1 in Space variables to use deterministic
-    # MockLLMClient stubs everywhere — useful when the inference endpoint
-    # is throwing 503s. Training itself is still real GRPO; only the
-    # specialist vote inputs are deterministic.
     use_mock = os.getenv("USE_MOCK_SPECIALISTS", "0") == "1"
     mock_flag = ["--mock"] if use_mock else []
     train_mock_flag = ["--mock-specialists"] if use_mock else []
 
-    # Phase 1 — pre-cache specialist votes
     _state["phase"] = "precaching"
     _stream_proc(
         [sys.executable, "scripts/precache_endpoint.py",
@@ -67,7 +67,6 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 2 — baseline eval (no LoRA)
     _state["phase"] = "eval_pre"
     _stream_proc(
         [sys.executable, "-m", "training.eval_rollout",
@@ -76,8 +75,6 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 3 — GRPO training on E4B (fits on L4 24 GB)
-    # (4 * 1) % 4 == 0 ✓
     _state["phase"] = "training"
     _stream_proc(
         [sys.executable, "-m", "training.train_grpo",
@@ -92,7 +89,6 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 4 — post-training eval (with the trained LoRA)
     _state["phase"] = "eval_post"
     run_dirs = sorted(glob.glob(str(WORKDIR / "training/runs/grpo_*")))
     if run_dirs:
@@ -105,11 +101,9 @@ def _run_pipeline() -> None:
             env_extra=endpoint_env,
         )
 
-    # Phase 5 — compile results
     _state["phase"] = "compiling"
     _stream_proc([sys.executable, "scripts/compile_results.py"])
 
-    # Phase 6 — upload artifacts to HF Hub
     _state["phase"] = "uploading"
     _upload_results(run_dirs[-1] if run_dirs else None)
 
@@ -133,7 +127,6 @@ def _upload_results(run_dir: str | None) -> None:
         "training/runs/eval_post/*.png",
     ]:
         to_upload.extend(glob.glob(str(WORKDIR / pattern)))
-
     if run_dir:
         for pattern in ["*.png", "args.json"]:
             to_upload.extend(glob.glob(str(Path(run_dir) / pattern)))
@@ -157,7 +150,7 @@ def _upload_results(run_dir: str | None) -> None:
 
 PHASE_LABELS = {
     "idle":       "⭕ Ready — click Launch to start",
-    "precaching": "⏳ Phase 1/5 — pre-caching 26B specialist votes ...",
+    "precaching": "⏳ Phase 1/5 — pre-caching specialist votes ...",
     "eval_pre":   "⏳ Phase 2/5 — baseline eval (no LoRA) ...",
     "training":   "🚀 Phase 3/5 — GRPO training Gemma 4 E4B ...",
     "eval_post":  "⏳ Phase 4/5 — post-training eval ...",
@@ -167,25 +160,104 @@ PHASE_LABELS = {
 }
 
 
-def launch_training():
-    if _state["phase"] not in ("idle", "done"):
-        return PHASE_LABELS.get(_state["phase"], _state["phase"])
-    threading.Thread(target=_run_pipeline, daemon=True).start()
-    return PHASE_LABELS["precaching"]
+HTML_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stocker — GRPO Training</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
+  h1 { color: #38bdf8; }
+  h2 { color: #38bdf8; border-top: 1px solid #334155; padding-top: 12px; margin-top: 24px; }
+  .status { background: #1e293b; padding: 14px 18px; border-radius: 8px; margin: 12px 0; font-size: 1.1em; border: 1px solid #334155; }
+  .btn { background: #2563eb; color: white; padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; }
+  .btn:hover { background: #1d4ed8; }
+  .btn:disabled { background: #475569; cursor: not-allowed; }
+  .logs { background: #020617; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Menlo, monospace; font-size: 12px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #1e293b; }
+  .plots img { max-width: 48%; border-radius: 8px; margin: 8px 1%; border: 1px solid #334155; }
+  .meta { color: #94a3b8; font-size: 0.9em; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <h1>⚡ Stocker — GRPO Training</h1>
+  <p class="meta">L4 GPU · pre-cache 26B specialist votes → baseline eval → GRPO E4B → post eval → compile → upload</p>
+
+  <div class="status" id="status">Loading status…</div>
+  <button class="btn" id="launchBtn" onclick="launch()">🚀 Launch Pipeline</button>
+
+  <h2>Live logs</h2>
+  <div class="logs" id="logs">No logs yet.</div>
+
+  <h2>Plots</h2>
+  <div class="plots" id="plots">Plots appear here once training completes.</div>
+
+<script>
+async function launch() {
+  const r = await fetch('/launch', { method: 'POST' });
+  const d = await r.json();
+  if (d.status === 'started') document.getElementById('launchBtn').disabled = true;
+}
+async function poll() {
+  try {
+    const s = await (await fetch('/status')).json();
+    document.getElementById('status').textContent = s.label;
+    if (s.phase !== 'idle' && s.phase !== 'done') {
+      document.getElementById('launchBtn').disabled = true;
+    } else {
+      document.getElementById('launchBtn').disabled = false;
+    }
+    const txt = await (await fetch('/logs')).text();
+    const logsEl = document.getElementById('logs');
+    const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 50;
+    logsEl.textContent = txt.slice(-12000) || 'No logs yet.';
+    if (wasNearBottom) logsEl.scrollTop = logsEl.scrollHeight;
+    const ps = await (await fetch('/plots')).json();
+    if (ps.length) {
+      document.getElementById('plots').innerHTML = ps.map(u => `<img src="${u}" />`).join('');
+    }
+  } catch (e) { /* ignore poll errors */ }
+}
+setInterval(poll, 3000);
+poll();
+</script>
+</body>
+</html>
+"""
 
 
-def poll_status():
-    return PHASE_LABELS.get(_state["phase"], _state["phase"])
+app = FastAPI(title="Stocker Training")
 
 
-def poll_logs():
+@app.get("/", response_class=HTMLResponse)
+def index() -> str:
+    return HTML_PAGE
+
+
+@app.post("/launch")
+def launch():
+    if _state["phase"] in ("idle", "done"):
+        LOG_PATH.write_text("")
+        threading.Thread(target=_run_pipeline, daemon=True).start()
+        return {"status": "started"}
+    return {"status": "already_running", "phase": _state["phase"]}
+
+
+@app.get("/status")
+def status():
+    phase = _state["phase"]
+    return {"phase": phase, "label": PHASE_LABELS.get(phase, phase)}
+
+
+@app.get("/logs", response_class=PlainTextResponse)
+def logs():
     if LOG_PATH.exists():
-        text = LOG_PATH.read_text()
-        return text[-8000:] if len(text) > 8000 else text
+        return LOG_PATH.read_text()
     return ""
 
 
-def poll_plots():
+@app.get("/plots")
+def plots():
     patterns = [
         "training/runs/grpo_*/*.png",
         "training/runs/eval_pre/*.png",
@@ -194,49 +266,15 @@ def poll_plots():
     images = []
     for p in patterns:
         images.extend(sorted(glob.glob(str(WORKDIR / p))))
-    return images or None
+    return [f"/plot?p={i}" for i in images]
 
 
-with gr.Blocks(title="Stocker — GRPO Training", theme=gr.themes.Soft()) as demo:
-    gr.Markdown(
-        "# Stocker — GRPO Training\n"
-        "Runs the full pipeline: **pre-cache 26B specialist votes → baseline eval → "
-        "GRPO train E4B moderator LoRA → post eval → compile & upload**.\n\n"
-        "Requires `HF_TOKEN`, `API_BASE_URL`, `MODEL_NAME` set as Space secrets."
-    )
+@app.get("/plot")
+def plot(p: str):
+    if not p.startswith(str(WORKDIR)):
+        return PlainTextResponse("forbidden", status_code=403)
+    return FileResponse(p)
 
-    status_box = gr.Textbox(
-        label="Status",
-        value=PHASE_LABELS["idle"],
-        interactive=False,
-        lines=1,
-    )
-
-    with gr.Row():
-        launch_btn = gr.Button("🚀 Launch Pipeline", variant="primary", scale=2)
-
-    log_box = gr.Textbox(
-        label="Live Logs",
-        lines=30,
-        max_lines=60,
-        interactive=False,
-        autoscroll=True,
-    )
-
-    gallery = gr.Gallery(
-        label="Training & Eval Plots",
-        show_label=True,
-        columns=2,
-        height="auto",
-    )
-
-    launch_btn.click(fn=launch_training, outputs=status_box)
-
-    # Poll every 3 seconds
-    timer = gr.Timer(3.0)
-    timer.tick(fn=poll_status, outputs=status_box)
-    timer.tick(fn=poll_logs,   outputs=log_box)
-    timer.tick(fn=poll_plots,  outputs=gallery)
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    uvicorn.run(app, host="0.0.0.0", port=7860)
