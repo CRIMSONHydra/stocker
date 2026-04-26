@@ -5,6 +5,7 @@
 - ``/blog`` — alias of ``/``
 """
 
+import re
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -17,6 +18,9 @@ ROOT = Path(__file__).resolve().parents[2]
 DIST_INDEX = ROOT / "frontend" / "dist" / "index.html"
 README_PATH = ROOT / "README.md"
 
+GITHUB_BLOB = "https://github.com/CRIMSONHydra/stocker/blob/main/"
+GITHUB_RAW  = "https://raw.githubusercontent.com/CRIMSONHydra/stocker/main/"
+
 
 def _strip_frontmatter(text: str) -> str:
     if text.startswith("---\n"):
@@ -26,12 +30,31 @@ def _strip_frontmatter(text: str) -> str:
     return text
 
 
+def _rewrite_urls(html: str) -> str:
+    """Rewrite relative href/src to absolute GitHub URLs so links resolve when
+    the README is served through the FastAPI iframe on the HF Space."""
+    def _fix(attr: str, base: str):
+        pattern = re.compile(rf'{attr}="([^"#?][^"]*)"')
+        def repl(m: re.Match) -> str:
+            url = m.group(1)
+            if url.startswith(("http://", "https://", "/", "#", "mailto:")):
+                return m.group(0)
+            return f'{attr}="{base}{url}"'
+        return pattern, repl
+
+    p1, r1 = _fix("href", GITHUB_BLOB)
+    p2, r2 = _fix("src",  GITHUB_RAW)
+    html = p1.sub(r1, html)
+    html = p2.sub(r2, html)
+    return html
+
+
 def _render_readme() -> str:
     if not README_PATH.is_file():
         return "<p><em>README.md not bundled in this image.</em></p>"
     md_text = _strip_frontmatter(README_PATH.read_text(encoding="utf-8"))
     md = MarkdownIt("commonmark").enable(["table", "strikethrough"])
-    return md.render(md_text)
+    return _rewrite_urls(md.render(md_text))
 
 
 BLOG_HTML = """<!DOCTYPE html>
@@ -74,15 +97,16 @@ BLOG_HTML = """<!DOCTYPE html>
 <body>
   <nav class="nav">
     <div class="nav-inner">
-      <span class="nav-title">⚡ Stocker</span>
+      <a href="#top" class="nav-title" style="text-decoration:none;">⚡ Stocker</a>
       <span class="nav-links">
-        <a href="/">Methodology</a>
+        <a href="#top">Top</a>
         <a href="https://github.com/CRIMSONHydra/stocker" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/CRIMSONHydra/stocker/blob/main/BLOG.md" target="_blank" rel="noopener">Blog</a>
         <a href="/web" class="cta">🚀 Live Demo</a>
       </span>
     </div>
   </nav>
-  <article>{readme}</article>
+  <article id="top">{readme}</article>
 </body>
 </html>"""
 
