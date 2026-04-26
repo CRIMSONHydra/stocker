@@ -265,6 +265,26 @@ pytest tests/ -q
 To run the council against your own endpoint, set `API_BASE_URL`,
 `MODEL_NAME`, and `HF_TOKEN` (see [.env.example](.env.example)).
 
+### Council vote cache
+
+Each `(role, ticker, date)` triple is computed once and cached as JSON. The
+env Space pulls a pre-warmed cache from the HF dataset
+[Hydr473/stocker-cache](https://huggingface.co/datasets/Hydr473/stocker-cache)
+on startup so judges' UI clicks are instant. To re-warm:
+
+```bash
+# 1. Compute votes via your endpoint (writes .cache/council/<role>/base/...)
+python scripts/precache_endpoint.py --tasks task_easy,task_medium,task_hard
+
+# 2. Upload to the dataset repo
+python scripts/upload_cache.py     # uses $STOCKER_CACHE_REPO or default
+
+# 3. Restart the env Space — its lifespan hook downloads the new cache.
+```
+
+The startup hook is no-op (and never crashes) when `STOCKER_CACHE_REPO` is
+unset, so local dev still works without HF Hub access.
+
 ---
 
 ## Evaluation

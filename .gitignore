@@ -32,13 +32,9 @@ coverage.xml
 .nox/
 
 # --- Stocker runtime artifacts --------------------------------------------
-# Council cache: ignore everything under .cache/ EXCEPT the demo bundle
-# (specialists/base for the 3 stable tasks). Allows shipping a warm cache
-# in the env Space so judges' UI clicks hit instant responses.
-.cache/*
-!.cache/council/
-.cache/council/*/lora_*/
-.cache/moderator/
+# Council vote cache lives in an HF dataset repo (Hydr473/stocker-cache),
+# downloaded at Space startup. Never commit it to git.
+.cache/
 # GRPO runs, eval rollouts, plots, LoRA adapters
 training/runs/
 !training/runs/.gitkeep

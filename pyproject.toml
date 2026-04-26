@@ -39,17 +39,19 @@ serve = [
     "vllm>=0.6.0",
 ]
 train = [
-    "trl>=0.11.0,<0.20.0",
-    # transformers <4.50 avoids the torchao quant import path that hits
-    # `torch.int1` (added in torch 2.6). Matches torch 2.5.1 base image.
-    "transformers>=4.45.0,<4.50.0",
-    # peft <0.13 doesn't probe torchao at LoRA-injection time, so it works
-    # without torchao>=0.16. Stays compatible with torch 2.5.1.
-    "peft>=0.11.0,<0.13.0",
-    "accelerate>=1.0.0",
-    "bitsandbytes>=0.43.0",
+    # Newer coherent stack: torch 2.6 (has torch.int1) → torchao>=0.16 →
+    # peft>=0.13 (LoRA-injection probe) → transformers>=4.55 (Gemma-4
+    # tokenizer fix, has BloomPreTrainedModel only via lazy import which
+    # works) → trl>=0.22 → huggingface_hub>=1.0.
+    "trl>=0.22.0",
+    "transformers>=4.55.0",
+    "peft>=0.16.0",
+    "accelerate>=1.6.0",
+    "bitsandbytes>=0.45.0",
     "datasets>=3.0.0",
     "tensorboard>=2.18.0",
+    "torchao>=0.16.0",
+    "huggingface_hub>=1.0.0",
 ]
 
 [tool.setuptools]

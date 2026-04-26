@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 import traceback
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -19,6 +21,7 @@ from app.config import settings
 
 FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
 TRAINING_RUNS = Path(__file__).resolve().parents[1] / "training" / "runs"
+CACHE_DIR    = Path(__file__).resolve().parents[1] / ".cache"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +29,39 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stderr)],
 )
 logger = logging.getLogger(__name__)
+
+
+def _hydrate_cache_from_hub() -> None:
+    """If STOCKER_CACHE_REPO is set, download the cache from that HF dataset
+    into .cache/ on startup. Idempotent — skipped when .cache/ already has
+    council/ entries. Never fails startup; logs and continues on error."""
+    repo = os.getenv("STOCKER_CACHE_REPO", "").strip()
+    if not repo:
+        return
+    if (CACHE_DIR / "council").exists() and any((CACHE_DIR / "council").iterdir()):
+        logger.info("Cache already populated; skipping hub download.")
+        return
+    try:
+        from huggingface_hub import snapshot_download
+        token = os.getenv("HF_TOKEN") or None
+        logger.info("Downloading council cache from %s ...", repo)
+        snapshot_download(
+            repo_id=repo,
+            repo_type="dataset",
+            local_dir=str(CACHE_DIR),
+            token=token,
+            allow_patterns=["council/**/*.json"],
+        )
+        n = sum(1 for _ in CACHE_DIR.rglob("*.json"))
+        logger.info("Cache hydrated: %d entries from %s", n, repo)
+    except Exception as e:
+        logger.warning("Cache hydration failed (%s); will fall back to live calls / mock.", e)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _hydrate_cache_from_hub()
+    yield
 
 
 def create_app() -> FastAPI:
@@ -36,6 +72,7 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
         docs_url="/docs",
         redoc_url="/redoc",
+        lifespan=lifespan,
     )
 
     @app.exception_handler(Exception)
