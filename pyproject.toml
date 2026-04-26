@@ -38,21 +38,22 @@ eval = [
 serve = [
     "vllm>=0.6.0",
 ]
-train = [
-    # Newer coherent stack: torch 2.6 (has torch.int1) → torchao>=0.16 →
-    # peft>=0.13 (LoRA-injection probe) → transformers>=4.55 (Gemma-4
-    # tokenizer fix, has BloomPreTrainedModel only via lazy import which
-    # works) → trl>=0.22 → huggingface_hub>=1.0.
-    "trl>=0.22.0",
-    "transformers>=4.55.0",
-    "peft>=0.16.0",
-    "accelerate>=1.6.0",
-    "bitsandbytes>=0.45.0",
-    "datasets>=3.0.0",
-    "tensorboard>=2.18.0",
-    "torchao>=0.16.0",
-    "huggingface_hub>=1.0.0",
-]
+#
+# NOTE: the [train] extras are intentionally NOT defined here.
+#
+# The training Space uses a deliberately decoupled dep stack that lives
+# in spaces/train/Dockerfile (heavy ML deps with exact pins). Keeping
+# train deps out of pyproject.toml means:
+#   * Env Space install never pulls torch/transformers/peft/torchao,
+#     so demo deploys can never break from training-side conflicts.
+#   * Training Space pins live next to the Dockerfile they're used in.
+#   * pip install -e ".[dev,data,eval]" still works for env-Space
+#     development without ever touching ML dependencies.
+#
+# To install training deps locally, see spaces/train/Dockerfile or run:
+#   pip install torch==2.10.0 torchvision==0.25.0 \
+#       transformers==5.6.2 peft==0.19.1 trl==1.2.0 ...
+# (matching the exact pins in spaces/train/Dockerfile).
 
 [tool.setuptools]
 # Explicit package list — setuptools' flat-layout autodetect would otherwise

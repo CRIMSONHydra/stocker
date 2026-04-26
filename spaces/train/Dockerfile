@@ -1,21 +1,13 @@
-# Training Space — Gemma 4 E4B GRPO on L4 GPU (24 GB)
+# Training Space — Gemma 4 GRPO on L4 GPU (24 GB)
 # Uploaded as Dockerfile (root) of the Hydr473/stocker-train Space.
 #
-# Required Space secrets (Settings → Variables and secrets):
-#   HF_TOKEN      write-access token for uploading results
-#   API_BASE_URL  https://<endpoint>.endpoints.huggingface.cloud/v1
-#   MODEL_NAME    ggml-org/gemma-4-26B-A4B-it-GGUF
-#   RESULTS_REPO  Hydr473/stocker-results
+# Decoupled from the env Space: this Dockerfile pins ALL ML deps inline
+# with exact versions. The env Space (root Dockerfile) installs only core
+# FastAPI deps from pyproject.toml and never touches torch/transformers.
+# Conflicts in either Space cannot affect the other.
 #
-# Layer order is deliberate:
-#   1. OS packages         (rare changes — cached forever)
-#   2. Heavy pip install   (cached unless THIS Dockerfile changes)
-#   3. Smoke test          (fails build immediately on dep mismatch)
-#   4. ADD commits/main    (cache-busts everything below)
-#   5. git clone           (~10s)
-#   6. editable install    (~5s)
-#   7. dataset build       (~30s)
-# Normal git push triggers only steps 5-7 (~45s total).
+# Required Space secrets (Settings → Variables and secrets):
+#   HF_TOKEN, API_BASE_URL, MODEL_NAME, RESULTS_REPO
 
 FROM pytorch/pytorch:2.10.0-cuda12.6-cudnn9-runtime
 
@@ -31,27 +23,35 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# ─── Layer 2: heavy pip install (cached) ────────────────────────────────
-# Newer coherent stack: torch 2.6 (has torch.int1) → torchao>=0.16 →
-# peft>=0.16 (LoRA-injection probe satisfied) → transformers>=4.55
-# (correct Gemma-4 tokenizer behavior) → trl>=0.22 → huggingface_hub>=1.0.
-# Gradio is NOT installed — it conflicts with openenv-core's websockets>=15.
-# The training Space UI uses minimal FastAPI + HTML (spaces/train/app.py).
-RUN pip install --no-cache-dir uv && \
-    uv pip install --system --no-cache \
-        "fastapi>=0.115.0" "uvicorn[standard]>=0.30.0" \
-        "pydantic>=2.0.0" "pydantic-settings>=2.6.0" \
-        "openai>=1.0.0" "openenv-core>=0.2.0" \
-        "pandas>=2.0.0" "pyarrow>=14.0.0" "pillow>=10.0.0" "markdown-it-py>=3.0.0" \
-        "yfinance>=0.2.0" "mplfinance>=0.12.0" "matplotlib>=3.8.0" \
-        "trl>=0.22.0" "transformers>=4.55.0" "peft>=0.16.0" \
-        "accelerate>=1.6.0" "bitsandbytes>=0.45.0" "datasets>=3.0.0" \
-        "tensorboard>=2.18.0" "torchao>=0.16.0" "huggingface_hub>=1.0.0"
+# ─── Layer 2: fresh venv (avoids PEP 668 in newer pytorch base images) ──
+# Not using --system-site-packages — we install our own pinned torch so
+# the dep set is fully reproducible regardless of base image's torch.
+ENV VIRTUAL_ENV=/opt/stocker-venv
+RUN /opt/conda/bin/python -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+RUN pip install --no-cache-dir uv
 
-# ─── Layer 3: build-time smoke test ────────────────────────────────────
-# If any dep combo is broken (import error, version mismatch, missing
-# attribute, tokenizer regression), this fails at BUILD time in 30 sec
-# instead of crashing 25 minutes into phase 3 of training.
+# ─── Layer 3: heavy pip install (cached unless THIS Dockerfile changes) ─
+# All exact-pinned. Torch/torchvision/torchaudio come from the base image.
+# These versions were verified locally to import cleanly together and load
+# the google/gemma-4-E4B-it tokenizer without the 'list has no .keys()'
+# regression.
+# --index-strategy unsafe-best-match needed because the PyTorch wheel
+# index ships an old `requests` (2.28.1) that breaks datasets>=4.0
+# (needs requests>=2.32.2). With this flag, uv picks the right version
+# across both indexes. (Verified via uv pip install --dry-run locally.)
+RUN uv pip install --no-cache --index-strategy unsafe-best-match \
+    --extra-index-url https://download.pytorch.org/whl/cu126 \
+    "fastapi" "uvicorn[standard]" "pydantic>=2.0" "pydantic-settings" \
+    "openai" "openenv-core" "pandas" "pyarrow" "pillow" "markdown-it-py" \
+    "yfinance" "mplfinance" "matplotlib" \
+    "torch==2.10.0" "torchvision==0.25.0" "torchaudio==2.10.0" \
+    "transformers==5.6.2" "peft==0.19.1" "trl==1.2.0" \
+    "accelerate==1.13.0" "bitsandbytes==0.49.2" "datasets==4.8.4" \
+    "tensorboard==2.20.0" "torchao==0.17.0" "huggingface_hub==1.12.0"
+
+# ─── Layer 4: build-time smoke test ────────────────────────────────────
+# Fails the build immediately if any pin combination is broken.
 RUN python -c "\
 import torch, transformers, peft, trl, bitsandbytes, accelerate; \
 import huggingface_hub as hub; \
@@ -60,20 +60,23 @@ from trl import GRPOConfig, GRPOTrainer; \
 from transformers import AutoTokenizer; \
 print(f'torch={torch.__version__} hub={hub.__version__}'); \
 print(f'transformers={transformers.__version__} peft={peft.__version__} trl={trl.__version__}'); \
-assert hasattr(torch, 'int1'), 'torch.int1 missing — torchao>=0.16 will crash'; \
-print('smoke test passed')\
+assert hasattr(torch, 'int1'), 'torch.int1 missing'; \
+assert hasattr(torch.utils._pytree, 'register_constant'), 'register_constant missing'; \
+print('smoke test (imports + torch features): passed')\
 "
 
-# ─── Layer 4: cache-bust on every commit to main ────────────────────────
+# ─── Layer 5: cache-bust on every commit to main ────────────────────────
 ADD https://api.github.com/repos/CRIMSONHydra/stocker/commits/main /tmp/.commit-sha
 
-# ─── Layer 5: fresh clone of the repo ───────────────────────────────────
+# ─── Layer 6: fresh clone of the repo (gets latest code) ────────────────
 RUN git clone --depth=1 https://github.com/CRIMSONHydra/stocker.git /app
 
-# ─── Layer 6: register the local package (no dep resolution) ────────────
+# ─── Layer 7: register the local package WITHOUT pulling its extras ─────
+# Crucial: --no-deps. Otherwise pip would try to re-resolve everything
+# from pyproject.toml and our pinned versions could drift.
 RUN cd /app && pip install --no-deps -e .
 
-# ─── Layer 7: build the bundled dataset ─────────────────────────────────
+# ─── Layer 8: build the bundled dataset ─────────────────────────────────
 RUN python scripts/build_dataset.py && python scripts/build_ideal_profit.py
 
 EXPOSE 7860
