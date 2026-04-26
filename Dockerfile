@@ -24,6 +24,10 @@ COPY server/ /app/server/
 COPY data/ /app/data/
 COPY inference.py client.py README.md /app/
 
+# Pre-built council cache — gives judges instant UI responses for the 3
+# stable tasks. Optional: COPY only fires if .cache/ exists in build context.
+COPY .cache/ /app/.cache/
+
 # Pull in the built frontend so FastAPI mounts the React SPA at /web
 COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 

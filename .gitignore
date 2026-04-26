@@ -32,8 +32,13 @@ coverage.xml
 .nox/
 
 # --- Stocker runtime artifacts --------------------------------------------
-# council vote cache (specialist + moderator)
-.cache/
+# Council cache: ignore everything under .cache/ EXCEPT the demo bundle
+# (specialists/base for the 3 stable tasks). Allows shipping a warm cache
+# in the env Space so judges' UI clicks hit instant responses.
+.cache/*
+!.cache/council/
+.cache/council/*/lora_*/
+.cache/moderator/
 # GRPO runs, eval rollouts, plots, LoRA adapters
 training/runs/
 !training/runs/.gitkeep
