@@ -1,14 +1,12 @@
 # Training Space — Gemma 4 E4B GRPO on L4 GPU (24 GB)
-# Deploy this directory as a HF Space with hardware tier "Nvidia L4".
-# Set secrets: HF_TOKEN, API_BASE_URL, MODEL_NAME in the Space settings.
+# This file is uploaded as Dockerfile (root) of the Hydr473/stocker-train Space.
+# It clones the stocker repo at build time so it has full access to all code.
 #
-# The main stocker repo root is the build context, so push like this:
-#   huggingface-cli upload Hydr473/stocker-train . --repo-type=space
-# OR push from the project root:
-#   git subtree push ...  (see README for full instructions)
-#
-# This Dockerfile is placed in spaces/train/ but the build context is the
-# repo root — so COPY paths are relative to the repo root.
+# Required Space secrets (Settings → Variables and secrets):
+#   HF_TOKEN      write-access token for uploading results
+#   API_BASE_URL  https://at0e6z2u64774tc7.us-east-1.aws.endpoints.huggingface.cloud/v1
+#   MODEL_NAME    ggml-org/gemma-4-26B-A4B-it-GGUF
+#   RESULTS_REPO  Hydr473/stocker-results
 
 FROM pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 
@@ -23,18 +21,13 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Install uv for fast dependency resolution
-RUN pip install --no-cache-dir uv
+# Clone the stocker repo (always pulls latest main)
+RUN git clone --depth=1 https://github.com/CRIMSONHydra/stocker.git /app
 
-# Copy dependency specification and install all extras
-COPY pyproject.toml ./
-RUN uv pip install --system -e ".[data,eval,train]"
-
-# Reinstall gradio (not in pyproject.toml — only needed in this Space)
-RUN pip install --no-cache-dir gradio>=4.44.0 huggingface_hub>=1.10.0
-
-# Copy the full project (data/, app/, training/, scripts/, etc.)
-COPY . .
+# Install uv + all required extras + gradio for the UI
+RUN pip install --no-cache-dir uv && \
+    uv pip install --system -e ".[data,eval,train]" && \
+    pip install --no-cache-dir "gradio>=4.44.0" "huggingface_hub>=1.10.0"
 
 # Pre-build the bundled dataset (parquet + charts). Idempotent.
 RUN python scripts/build_dataset.py && python scripts/build_ideal_profit.py
