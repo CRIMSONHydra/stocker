@@ -26,8 +26,10 @@ RUN apt-get update -qq && \
 # ─── Layer 2: fresh venv (avoids PEP 668 in newer pytorch base images) ──
 # Not using --system-site-packages — we install our own pinned torch so
 # the dep set is fully reproducible regardless of base image's torch.
+# pytorch:2.10+ images are Ubuntu 24.04 based, Python at /usr/bin/python3
+# (via python-is-python3). Older images had Python under /opt/conda.
 ENV VIRTUAL_ENV=/opt/stocker-venv
-RUN /opt/conda/bin/python -m venv $VIRTUAL_ENV
+RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN pip install --no-cache-dir uv
 
