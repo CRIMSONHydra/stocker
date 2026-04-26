@@ -86,13 +86,11 @@ class StockerEnv:
             )
 
         price = self._prices[self._current_index]
-        prev_portfolio = self._cash + self._position * price
         invalid = self._apply_action(action, price)
         new_portfolio = self._cash + self._position * price
 
         result = compute_step_reward(
             action=action,
-            prev_portfolio=prev_portfolio,
             new_portfolio=new_portfolio,
             starting_cash=float(self._task["starting_cash"]),
             invalid=invalid,
@@ -139,6 +137,19 @@ class StockerEnv:
                 "position": self._position,
             },
         )
+
+    # ----------------------------------------------------------------- public
+    def is_ready(self) -> bool:
+        """True if the env has been reset and the episode is still live."""
+        return bool(self._prices) and not self._done
+
+    def current_observation(self) -> MarketObservation:
+        """Public accessor for the agent-visible observation at the current step."""
+        if not self._prices:
+            raise RuntimeError("env has not been reset yet")
+        if self._done:
+            return self._terminal_observation()
+        return self._build_observation(self._current_index)
 
     # ------------------------------------------------------------------ state
     def state(self) -> EnvironmentState:

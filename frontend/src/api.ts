@@ -130,6 +130,8 @@ export interface StockerEnv {
   envState: EnvironmentState | null;
   council: CouncilDecision | null;
   ohlcv: OhlcvResponse | null;
+  /** Starting cash for the active task, captured from /reset info. */
+  startingCash: number;
   loading: boolean;
   error: string | null;
   selectTask: (taskId: string) => Promise<void>;
@@ -143,6 +145,7 @@ export function useStockerEnv(): StockerEnv {
   const [envState, setEnvState] = useState<EnvironmentState | null>(null);
   const [council, setCouncil] = useState<CouncilDecision | null>(null);
   const [ohlcv, setOhlcv] = useState<OhlcvResponse | null>(null);
+  const [startingCash, setStartingCash] = useState<number>(10000);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -153,6 +156,8 @@ export function useStockerEnv(): StockerEnv {
       const reset = await api.reset(next);
       setTaskId(next);
       setObservation(reset.observation);
+      const sc = Number(reset.info?.starting_cash);
+      if (Number.isFinite(sc) && sc > 0) setStartingCash(sc);
       const [bars, st] = await Promise.all([api.ohlcv(next), api.state()]);
       setOhlcv(bars);
       setEnvState(st);
@@ -223,6 +228,7 @@ export function useStockerEnv(): StockerEnv {
     envState,
     council,
     ohlcv,
+    startingCash,
     loading,
     error,
     selectTask,

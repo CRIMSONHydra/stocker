@@ -30,11 +30,12 @@ htmlcov/
 coverage.xml
 .tox/
 .nox/
-.cache/
 
 # --- Stocker runtime artifacts --------------------------------------------
-.cache/                       # council vote cache (specialist + moderator)
-training/runs/                # GRPO runs, eval rollouts, plots, LoRA adapters
+# council vote cache (specialist + moderator)
+.cache/
+# GRPO runs, eval rollouts, plots, LoRA adapters
+training/runs/
 !training/runs/.gitkeep
 results.json
 *.log

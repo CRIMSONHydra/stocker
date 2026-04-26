@@ -39,7 +39,6 @@ def _call(
     new_portfolio = starting_cash * (1.0 + actual_pnl_pct)
     return compute_step_reward(
         action=TradeAction(side="hold", quantity=0),
-        prev_portfolio=starting_cash,
         new_portfolio=new_portfolio,
         starting_cash=starting_cash,
         invalid=invalid,

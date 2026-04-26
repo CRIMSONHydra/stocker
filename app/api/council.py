@@ -22,13 +22,9 @@ async def get_council() -> CouncilDecision:
     import app.api.env as env_module
 
     env = env_module.current_env
-    if env._done or not env._prices:
+    if not env.is_ready():
         raise HTTPException(
             status_code=409,
             detail="env not initialized or episode complete — call /reset first",
         )
-    obs = env._build_observation(env._current_index)
-    try:
-        return await _council.run_async(obs)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"council failed: {e}")
+    return await _council.run_async(env.current_observation())

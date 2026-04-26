@@ -211,7 +211,7 @@ const CandlestickChart = ({ bars }: { bars: OhlcvBar[] }) => {
 // ---------------------------------------------------------------- TerminalView
 
 const TerminalView = ({ env }: { env: StockerEnv }) => {
-  const { observation, envState, council, ohlcv, submitTrade, loading } = env;
+  const { observation, envState, council, ohlcv, startingCash, submitTrade, loading } = env;
 
   const [side, setSide] = useState<Side>('buy');
   const [qty, setQty] = useState<number>(10);
@@ -225,10 +225,11 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
 
   const lastVolume = ohlcv?.bars[ohlcv.bars.length - 1]?.volume ?? 0;
   const portfolioValue = envState?.portfolio_value ?? observation?.portfolio_value ?? 0;
-  const startingCash = 10000;
-  const alphaPct = portfolioValue ? ((portfolioValue - startingCash) / startingCash) * 100 : 0;
+  const alphaPct = portfolioValue && startingCash > 0
+    ? ((portfolioValue - startingCash) / startingCash) * 100
+    : 0;
 
-  const consensus = council
+  const consensus = council && council.votes.length > 0
     ? council.votes.reduce((a, v) => a + v.signal, 0) / council.votes.length
     : 0;
 
@@ -534,7 +535,7 @@ const SPECIALIST_VISUALS: Record<
 
 const CouncilView = ({ env }: { env: StockerEnv }) => {
   const { observation, council } = env;
-  const consensus = council
+  const consensus = council && council.votes.length > 0
     ? council.votes.reduce((a, v) => a + v.signal, 0) / council.votes.length
     : 0;
   const consensusLabel =
@@ -1000,7 +1001,7 @@ const GalleryView = ({
 // --------------------------------------------------------------- PortfolioView
 
 const PortfolioView = ({ env }: { env: StockerEnv }) => {
-  const { observation, envState } = env;
+  const { observation, envState, startingCash } = env;
 
   if (!observation || !envState) {
     return (
@@ -1016,9 +1017,8 @@ const PortfolioView = ({ env }: { env: StockerEnv }) => {
   const value = balance * price;
   const portfolio = envState.portfolio_value;
   const cash = envState.cash;
-  const startingCash = 10000;
   const pnl = portfolio - startingCash;
-  const pnlPct = (pnl / startingCash) * 100;
+  const pnlPct = startingCash > 0 ? (pnl / startingCash) * 100 : 0;
 
   const equityShare = portfolio > 0 ? (value / portfolio) * 100 : 0;
   const cashShare = portfolio > 0 ? (cash / portfolio) * 100 : 0;

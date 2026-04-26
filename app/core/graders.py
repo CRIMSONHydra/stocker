@@ -31,7 +31,6 @@ INVALID_ACTION_PENALTY = 0.01
 def compute_step_reward(
     *,
     action: TradeAction,
-    prev_portfolio: float,
     new_portfolio: float,
     starting_cash: float,
     invalid: bool,
