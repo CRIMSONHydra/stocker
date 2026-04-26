@@ -6,14 +6,19 @@ import logging
 import sys
 import time
 import traceback
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.router import api_router
 from app.api.frontend import router as frontend_router
 from app.config import settings
+
+FRONTEND_DIST = Path(__file__).resolve().parents[1] / "frontend" / "dist"
+TRAINING_RUNS = Path(__file__).resolve().parents[1] / "training" / "runs"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -59,6 +64,18 @@ def create_app() -> FastAPI:
 
     app.include_router(api_router)
     app.include_router(frontend_router)
+
+    assets_dir = FRONTEND_DIST / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+
+    if TRAINING_RUNS.is_dir():
+        app.mount(
+            "/training/runs",
+            StaticFiles(directory=str(TRAINING_RUNS)),
+            name="training-runs",
+        )
+
     return app
 
 

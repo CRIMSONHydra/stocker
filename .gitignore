@@ -32,11 +32,18 @@ coverage.xml
 .nox/
 
 # --- Stocker runtime artifacts --------------------------------------------
-.cache/                       # council vote cache (specialist + moderator)
-training/runs/                # GRPO runs, eval rollouts, plots, LoRA adapters
+# council vote cache (specialist + moderator)
+.cache/
+# GRPO runs, eval rollouts, plots, LoRA adapters
+training/runs/
 !training/runs/.gitkeep
 results.json
 *.log
+
+# --- Frontend (React/Vite) -------------------------------------------------
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
 
 # --- Notebook noise --------------------------------------------------------
 .ipynb_checkpoints/

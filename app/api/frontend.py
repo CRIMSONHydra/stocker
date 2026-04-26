@@ -1,9 +1,18 @@
-"""Serves the embedded HTML frontend."""
+"""Serves the embedded HTML frontend.
+
+When a built React SPA exists at ``frontend/dist/index.html``, that is served at
+``/`` and ``/web``. Otherwise the inline HTML below is served as a fallback so
+the API is usable without Node tooling (and so tests do not require a build).
+"""
+
+from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 router = APIRouter(tags=["frontend"])
+
+DIST_INDEX = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "index.html"
 
 FRONTEND_HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -119,7 +128,9 @@ async function submit() {
 </html>"""
 
 
-@router.get("/", response_class=HTMLResponse)
-@router.get("/web", response_class=HTMLResponse)
-async def index() -> HTMLResponse:
+@router.get("/")
+@router.get("/web")
+async def index():
+    if DIST_INDEX.is_file():
+        return FileResponse(DIST_INDEX)
     return HTMLResponse(content=FRONTEND_HTML)
