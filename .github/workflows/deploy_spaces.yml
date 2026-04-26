@@ -14,20 +14,24 @@ jobs:
           fetch-depth: 0
           lfs: true
 
-      - name: Ensure Space exists
+      - name: Ensure Space exists + set secrets
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN:     ${{ secrets.HF_TOKEN }}
+          API_BASE_URL: ${{ secrets.HF_API_BASE_URL }}
+          MODEL_NAME:   ${{ secrets.HF_MODEL_NAME }}
         run: |
           pip install --quiet "huggingface_hub>=1.10"
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
-          HfApi(token=os.environ["HF_TOKEN"]).create_repo(
-              repo_id="Hydr473/stocker",
-              repo_type="space",
-              space_sdk="docker",
-              exist_ok=True,
-          )
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo = "Hydr473/stocker"
+          api.create_repo(repo_id=repo, repo_type="space", space_sdk="docker", exist_ok=True)
+          # Optional secrets — env Space only needs them if /inference is hit
+          for k in ("HF_TOKEN", "API_BASE_URL", "MODEL_NAME"):
+              v = os.environ.get(k, "")
+              if v:
+                  api.add_space_secret(repo_id=repo, key=k, value=v)
           PY
 
       - name: Push to Hydr473/stocker Space
@@ -44,20 +48,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure Space exists
+      - name: Ensure Space exists + set secrets
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN:     ${{ secrets.HF_TOKEN }}
+          API_BASE_URL: ${{ secrets.HF_API_BASE_URL }}
+          MODEL_NAME:   ${{ secrets.HF_MODEL_NAME }}
+          RESULTS_REPO: ${{ secrets.HF_RESULTS_REPO }}
         run: |
           pip install --quiet "huggingface_hub>=1.10"
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
-          HfApi(token=os.environ["HF_TOKEN"]).create_repo(
-              repo_id="Hydr473/stocker-train",
-              repo_type="space",
-              space_sdk="docker",
-              exist_ok=True,
-          )
+          api = HfApi(token=os.environ["HF_TOKEN"])
+          repo = "Hydr473/stocker-train"
+          api.create_repo(repo_id=repo, repo_type="space", space_sdk="docker", exist_ok=True)
+          # Required secrets for the training pipeline
+          for k in ("HF_TOKEN", "API_BASE_URL", "MODEL_NAME", "RESULTS_REPO"):
+              v = os.environ.get(k, "")
+              if v:
+                  api.add_space_secret(repo_id=repo, key=k, value=v)
+                  print(f"  set secret {k}")
           PY
 
       - name: Push Dockerfile to Hydr473/stocker-train Space
