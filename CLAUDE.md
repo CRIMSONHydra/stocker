@@ -38,6 +38,7 @@ via TRL on top of `google/gemma-4-E4B-it`.
 ├── server/app.py           # OpenEnv entry point (`server.app:main`)
 ├── inference.py            # council-driven OpenEnv inference loop (root)
 ├── client.py
+├── frontend/               # Vite + React 19 + Tailwind v4 SPA (built artefact mounted by FastAPI)
 ├── scripts/                # build_dataset, render_charts, serve_vllm, validate_tasks
 ├── training/               # eval_rollout, train_grpo, runs/
 ├── tests/
@@ -45,6 +46,23 @@ via TRL on top of `google/gemma-4-E4B-it`.
 ├── openenv.yaml
 └── pyproject.toml
 ```
+
+## Frontend
+
+- Source lives in [frontend/](frontend/) — Vite + React 19 + TypeScript +
+  Tailwind v4. Single `App.tsx` with six tabs (Terminal, Council, Training,
+  Gallery, Portfolio, Intelligence).
+- Dev: `cd frontend && npm install && npm run dev` (HMR on :3000).
+- Production: `cd frontend && npm run build` emits `frontend/dist/`. FastAPI
+  serves `frontend/dist/index.html` at `/` and `/web`, and mounts
+  `frontend/dist/assets/` at `/assets` (see [app/main.py](app/main.py) and
+  [app/api/frontend.py](app/api/frontend.py)).
+- Builds are **manual**. Don't add auto-build to CI, hooks, or `npm` scripts
+  triggered from Python.
+- When `frontend/dist/` is absent, FastAPI falls back to the inline
+  `FRONTEND_HTML` string in [app/api/frontend.py](app/api/frontend.py). That
+  fallback is the lowest-common-denominator UI for headless dev/tests and
+  must keep working without Node.
 
 ## Conventions
 
@@ -73,8 +91,6 @@ via TRL on top of `google/gemma-4-E4B-it`.
 
 ## Don't
 
-- Don't introduce a frontend build step — the HTML lives inline in
-  [app/api/frontend.py](app/api/frontend.py).
 - Don't bake live API calls into specialists. Council inputs come from the
   bundled parquet dataset (`app/data/loader.py`). Live sources are the data
   builder's job.
@@ -84,3 +100,7 @@ via TRL on top of `google/gemma-4-E4B-it`.
   trainer's reward replay both depend on it.
 - Don't make specialists rely on the moderator's LoRA. Specialists must
   remain frozen so their cached votes are reusable across GRPO steps.
+- Don't auto-build the React frontend from Python or CI. Builds are run by
+  hand with `npm run build`. Don't delete the inline `FRONTEND_HTML`
+  fallback in [app/api/frontend.py](app/api/frontend.py) — tests and
+  Node-less dev rely on it.

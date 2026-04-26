@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 
+from app.config import settings
 from app.core.graders import compute_step_reward, compute_trajectory_bonus
 from app.core.tasks import get_task_definition
 from app.data import loader
@@ -95,6 +96,11 @@ class StockerEnv:
             new_portfolio=new_portfolio,
             starting_cash=float(self._task["starting_cash"]),
             invalid=invalid,
+            step_index=self._current_index,
+            total_steps=len(self._prices),
+            ideal_pnl_pct_series=self._task.get("ideal_pnl_pct_series", []),
+            ideal_pnl_pct_total=float(self._task.get("ideal_pnl_pct_total", 0.0)),
+            settings=settings,
         )
         reward = result.score
 
@@ -166,22 +172,30 @@ class StockerEnv:
 
     # ---------------------------------------------------------------- helpers
     def _apply_action(self, action: TradeAction, price: float) -> bool:
-        """Apply trade. Returns True if invalid (insufficient cash/position)."""
+        """Apply trade. Returns True if invalid (insufficient cash/position).
+
+        Buys and sells incur a transaction cost equal to
+        settings.transaction_cost_rate * trade_notional, deducted from cash.
+        """
         if action.side == "hold" or action.quantity <= 0:
             return False
 
+        rate = settings.transaction_cost_rate
+
         if action.side == "buy":
-            cost = action.quantity * price
-            if cost > self._cash:
+            notional = action.quantity * price
+            total_cost = notional * (1.0 + rate)
+            if total_cost > self._cash:
                 return True
-            self._cash -= cost
+            self._cash -= total_cost
             self._position += action.quantity
             return False
 
         if action.side == "sell":
             if action.quantity > self._position:
                 return True
-            self._cash += action.quantity * price
+            notional = action.quantity * price
+            self._cash += notional * (1.0 - rate)
             self._position -= action.quantity
             return False
 
