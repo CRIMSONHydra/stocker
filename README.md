@@ -16,10 +16,10 @@ tags:
 
 # Stocker — Multi-Agent Council RL for Stock Trading
 
-> **[🤗 Environment Space](https://huggingface.co/spaces/Hydr473/stocker)** ·
+> **[🤗 Environment Space](https://huggingface.co/spaces/Hydr473/stocker-env)** ·
 > **[📓 Training Notebook](training/train_grpo.ipynb)** ·
 > **[📝 HF Blog Post](https://huggingface.co/Hydr473/posts)** ·
-> **[🎯 Training Space](https://huggingface.co/spaces/Hydr473/stocker-train)**
+> **[🎯 Training Space](https://huggingface.co/spaces/Hydr473/stocker-env-train)**
 
 **Problem:** LLMs can reason about markets from multiple angles simultaneously —
 charts, news, macro, technicals, sentiment. Can we train a *moderator* LLM to
@@ -225,22 +225,22 @@ The OpenEnv contract is live at the HF Space — interact with `/reset`, `/step`
 
 ```bash
 # Reset to task_easy
-curl -X POST https://hydr473-stocker.hf.space/reset \
+curl -X POST https://hydr473-stocker-env.hf.space/reset \
      -H "Content-Type: application/json" \
      -d '{"task_id": "task_easy"}'
 
 # Submit a trade
-curl -X POST https://hydr473-stocker.hf.space/step \
+curl -X POST https://hydr473-stocker-env.hf.space/step \
      -H "Content-Type: application/json" \
      -d '{"side": "buy", "quantity": 10}'
 ```
 
-Or open `https://hydr473-stocker.hf.space/web` for the interactive React UI
+Or open `https://hydr473-stocker-env.hf.space/web` for the interactive React UI
 (six tabs: Terminal, Council, Training, Gallery, Portfolio, Intelligence).
 
 ### B. Run GRPO training (one click on the L4 GPU Space)
 
-Open [Hydr473/stocker-train](https://huggingface.co/spaces/Hydr473/stocker-train)
+Open [Hydr473/stocker-train](https://huggingface.co/spaces/Hydr473/stocker-env-train)
 and click **🚀 Launch Pipeline**. The Gradio UI streams the full 6-phase run
 (precache → eval_pre → GRPO → eval_post → compile → upload) and uploads the
 final plots + LoRA adapter to [Hydr473/stocker-results](https://huggingface.co/datasets/Hydr473/stocker-results).
@@ -356,7 +356,7 @@ python scripts/compile_results.py
 | Training script using TRL (Colab notebook) | ✅ [train_grpo.ipynb](training/train_grpo.ipynb) |
 | Evidence of training (loss + reward plots) | ✅ [RESULTS.md](training/runs/RESULTS.md) |
 | Writeup / HF blog post | ✅ [BLOG.md](BLOG.md) / [HF Post](https://huggingface.co/Hydr473/posts) |
-| Environment on HF Space | ✅ [Hydr473/stocker](https://huggingface.co/spaces/Hydr473/stocker) |
+| Environment on HF Space | ✅ [Hydr473/stocker-env](https://huggingface.co/spaces/Hydr473/stocker-env) |
 | README with problem + env + results | ✅ This file |
 | README links to Space + blog + plots | ✅ Top of this file |
 

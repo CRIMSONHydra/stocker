@@ -8,7 +8,7 @@ on:
 # is HF_TOKEN. Edit these in-place if your endpoint URL or model changes.
 env:
   HF_USERNAME:    Hydr473
-  ENV_SPACE:      Hydr473/stocker
+  ENV_SPACE:      Hydr473/stocker-env
   TRAIN_SPACE:    Hydr473/stocker-train
   API_BASE_URL:   https://at0e6z2u64774tc7.us-east-1.aws.endpoints.huggingface.cloud/v1
   MODEL_NAME:     ggml-org/gemma-4-26B-A4B-it-GGUF
