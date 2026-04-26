@@ -45,10 +45,21 @@ class Council:
 
     # ------------------------------------------------------------------ sync
     def run(self, obs: MarketObservation) -> CouncilDecision:
-        return asyncio.run(self.run_async(obs))
+        """Sync entry point — works in scripts AND inside Jupyter cells.
+
+        We use ThreadPoolExecutor directly instead of asyncio.run() because
+        Jupyter/Colab cells execute inside an already-running event loop,
+        which makes asyncio.run() error with 'cannot be called from a
+        running event loop'.
+        """
+        with ThreadPoolExecutor(max_workers=len(self.specialists)) as pool:
+            votes = list(pool.map(lambda sp: self._cached_vote(sp, obs), self.specialists))
+        return self._cached_decide(obs, votes)
 
     # ----------------------------------------------------------------- async
     async def run_async(self, obs: MarketObservation) -> CouncilDecision:
+        """Async variant for callers already inside an event loop that want
+        to `await` the council instead of blocking the thread."""
         loop = asyncio.get_event_loop()
 
         with ThreadPoolExecutor(max_workers=len(self.specialists)) as pool:
