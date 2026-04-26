@@ -1,0 +1,45 @@
+name: Deploy to HF Spaces
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy-env-space:
+    name: Deploy environment Space
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hydr473/stocker Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote add hf-space \
+            https://Hydr473:${HF_TOKEN}@huggingface.co/spaces/Hydr473/stocker
+          git push hf-space main --force
+
+  deploy-train-space:
+    name: Deploy training Space Dockerfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push Dockerfile to Hydr473/stocker-train Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git clone \
+            https://Hydr473:${HF_TOKEN}@huggingface.co/spaces/Hydr473/stocker-train \
+            /tmp/train-space
+          cp spaces/train/Dockerfile /tmp/train-space/Dockerfile
+          cp spaces/train/app.py     /tmp/train-space/app.py
+          cd /tmp/train-space
+          git config user.email "ci@github.com"
+          git config user.name  "GitHub Actions"
+          git add Dockerfile app.py
+          git diff --staged --quiet || git commit -m "ci: sync from stocker@${{ github.sha }}"
+          git push
