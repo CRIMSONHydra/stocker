@@ -31,21 +31,34 @@ def _strip_frontmatter(text: str) -> str:
 
 
 def _rewrite_urls(html: str) -> str:
-    """Rewrite relative href/src to absolute GitHub URLs so links resolve when
-    the README is served through the FastAPI iframe on the HF Space."""
-    def _fix(attr: str, base: str):
-        pattern = re.compile(rf'{attr}="([^"#?][^"]*)"')
-        def repl(m: re.Match) -> str:
-            url = m.group(1)
-            if url.startswith(("http://", "https://", "/", "#", "mailto:")):
-                return m.group(0)
-            return f'{attr}="{base}{url}"'
-        return pattern, repl
+    """Rewrite relative href/src to absolute GitHub URLs and force external
+    links to open in a new tab (the HF Space iframe blocks in-frame nav to
+    cross-origin URLs, so plain <a> clicks silently fail)."""
+    # 1) Rewrite relative href to GitHub blob URL
+    def fix_href(m: re.Match) -> str:
+        url = m.group(1)
+        if url.startswith(("http://", "https://", "/", "#", "mailto:")):
+            return m.group(0)
+        return f'href="{GITHUB_BLOB}{url}"'
+    html = re.sub(r'href="([^"#?][^"]*)"', fix_href, html)
 
-    p1, r1 = _fix("href", GITHUB_BLOB)
-    p2, r2 = _fix("src",  GITHUB_RAW)
-    html = p1.sub(r1, html)
-    html = p2.sub(r2, html)
+    # 2) Rewrite relative img src to GitHub raw URL
+    def fix_src(m: re.Match) -> str:
+        url = m.group(1)
+        if url.startswith(("http://", "https://", "/")):
+            return m.group(0)
+        return f'src="{GITHUB_RAW}{url}"'
+    html = re.sub(r'src="([^"#?][^"]*)"', fix_src, html)
+
+    # 3) Add target="_blank" + rel to every external <a href="http(s)://...">
+    #    so clicks escape the HF Space iframe.
+    def add_target(m: re.Match) -> str:
+        tag = m.group(0)
+        if "target=" in tag:
+            return tag
+        return tag[:-1] + ' target="_blank" rel="noopener noreferrer">'
+    html = re.sub(r'<a\s+href="https?://[^"]+"\s*>', add_target, html)
+
     return html
 
 
