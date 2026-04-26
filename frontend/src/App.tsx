@@ -31,9 +31,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   CrosshairMode,
   ColorType,
+  LineStyle,
   createChart,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
+  type SeriesMarker,
+  type Time,
 } from 'lightweight-charts';
 
 import {
@@ -50,6 +54,8 @@ import {
   type StockerEnv,
   type TrainingMetrics,
 } from './api';
+
+type Tab = 'Terminal' | 'Council' | 'Training' | 'Gallery' | 'Portfolio' | 'Intelligence';
 
 // --------------------------------------------------------------------- atoms
 const SidebarItem = ({
@@ -109,11 +115,30 @@ const AgentCard = ({
 
 // ---------------------------------------------------------------------- chart
 
-const CandlestickChart = ({ bars }: { bars: OhlcvBar[] }) => {
+export type ChartRange = '1M' | '3M' | '6M' | 'All';
+
+const RANGE_BARS: Record<Exclude<ChartRange, 'All'>, number> = {
+  '1M': 22,
+  '3M': 66,
+  '6M': 132,
+};
+
+const CandlestickChart = ({
+  bars,
+  currentDate,
+  currentPrice,
+  range,
+}: {
+  bars: OhlcvBar[];
+  currentDate?: string | null;
+  currentPrice?: number | null;
+  range?: ChartRange;
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeRef = useRef<ISeriesApi<'Histogram'> | null>(null);
+  const priceLineRef = useRef<IPriceLine | null>(null);
 
   // mount once
   useEffect(() => {
@@ -175,6 +200,7 @@ const CandlestickChart = ({ bars }: { bars: OhlcvBar[] }) => {
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;
+      priceLineRef.current = null;
     };
   }, []);
 
@@ -202,19 +228,86 @@ const CandlestickChart = ({ bars }: { bars: OhlcvBar[] }) => {
         color: b.close >= b.open ? 'rgba(0,255,65,0.35)' : 'rgba(255,180,171,0.35)',
       })),
     );
-    chartRef.current?.timeScale().fitContent();
   }, [bars]);
+
+  // apply range filter (or fitContent for All)
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !bars || bars.length === 0) return;
+    const r = range ?? 'All';
+    if (r === 'All') {
+      chart.timeScale().fitContent();
+      return;
+    }
+    const n = RANGE_BARS[r];
+    const fromIdx = Math.max(0, bars.length - n);
+    chart.timeScale().setVisibleRange({
+      from: bars[fromIdx].time as Time,
+      to: bars[bars.length - 1].time as Time,
+    });
+  }, [bars, range]);
+
+  // current-step marker on the candle series
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series) return;
+    if (currentDate) {
+      const markers: SeriesMarker<Time>[] = [
+        {
+          time: currentDate as Time,
+          position: 'aboveBar',
+          color: '#00FF41',
+          shape: 'arrowDown',
+          text: 'NOW',
+        },
+      ];
+      series.setMarkers(markers);
+    } else {
+      series.setMarkers([]);
+    }
+  }, [currentDate]);
+
+  // horizontal price line at the current observation price
+  useEffect(() => {
+    const series = candleRef.current;
+    if (!series) return;
+    if (priceLineRef.current) {
+      try {
+        series.removePriceLine(priceLineRef.current);
+      } catch {
+        // already gone
+      }
+      priceLineRef.current = null;
+    }
+    if (currentPrice != null && Number.isFinite(currentPrice)) {
+      priceLineRef.current = series.createPriceLine({
+        price: currentPrice,
+        color: '#00FF41',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'NOW',
+      });
+    }
+  }, [currentPrice]);
 
   return <div ref={containerRef} className="flex-1 min-h-[300px] w-full" />;
 };
 
 // ---------------------------------------------------------------- TerminalView
 
-const TerminalView = ({ env }: { env: StockerEnv }) => {
-  const { observation, envState, council, ohlcv, startingCash, submitTrade, loading } = env;
+const TerminalView = ({
+  env,
+  onSwitchTab,
+}: {
+  env: StockerEnv;
+  onSwitchTab: (tab: Tab) => void;
+}) => {
+  const { observation, envState, council, ohlcv, startingCash, submitTrade, selectTask, loading } = env;
 
   const [side, setSide] = useState<Side>('buy');
   const [qty, setQty] = useState<number>(10);
+  const [range, setRange] = useState<ChartRange>('All');
 
   const change = useMemo(() => {
     if (!ohlcv || ohlcv.bars.length < 2) return 0;
@@ -233,7 +326,16 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
     ? council.votes.reduce((a, v) => a + v.signal, 0) / council.votes.length
     : 0;
 
-  const submitDisabled = loading || !observation || envState?.done;
+  const position = observation?.position ?? 0;
+  const canSell = position > 0;
+
+  // If position drops to 0 while the user has SELL selected, flip back to BUY.
+  useEffect(() => {
+    if (side === 'sell' && !canSell) setSide('buy');
+  }, [side, canSell]);
+
+  const sellInvalid = side === 'sell' && (!canSell || qty > position || qty <= 0);
+  const submitDisabled = loading || !observation || envState?.done || sellInvalid;
 
   return (
     <div className="flex-1 flex flex-col gap-4 min-h-0">
@@ -269,6 +371,17 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
         </div>
         <div className="flex items-center gap-8">
           <div className="flex flex-col items-end">
+            <span className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest mb-0.5">Position</span>
+            <span
+              className={`font-mono font-bold ${
+                position > 0 ? 'text-[#00FF41]' : 'text-neutral-500'
+              }`}
+            >
+              {position} {observation?.ticker ?? ''}
+            </span>
+          </div>
+          <div className="w-px h-8 bg-white/10" />
+          <div className="flex flex-col items-end">
             <span className="text-[10px] uppercase font-bold text-neutral-500 tracking-widest mb-0.5">Portfolio</span>
             <span className="font-mono font-bold text-white">
               ${portfolioValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}
@@ -293,10 +406,19 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
           <div className="absolute inset-0 scanline z-0 pointer-events-none" />
           <div className="h-10 border-b border-white/5 flex items-center justify-between px-4 bg-white/5 z-10">
             <div className="flex gap-4 font-mono text-[10px] uppercase tracking-widest">
-              <button className="text-[#00FF41] border-b border-[#00FF41] py-3">1D</button>
-              <button className="text-neutral-500 hover:text-white py-3">1W</button>
-              <button className="text-neutral-500 hover:text-white py-3">1M</button>
-              <button className="text-neutral-500 hover:text-white py-3">3M</button>
+              {(['1M', '3M', '6M', 'All'] as ChartRange[]).map((r) => (
+                <button
+                  key={r}
+                  onClick={() => setRange(r)}
+                  className={`py-3 transition-colors ${
+                    range === r
+                      ? 'text-[#00FF41] border-b border-[#00FF41]'
+                      : 'text-neutral-500 hover:text-white'
+                  }`}
+                >
+                  {r}
+                </button>
+              ))}
             </div>
             <div className="flex gap-2">
               <button className="p-1 hover:bg-white/10 rounded transition-colors text-neutral-400">
@@ -307,7 +429,12 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
               </button>
             </div>
           </div>
-          <CandlestickChart bars={ohlcv?.bars ?? []} />
+          <CandlestickChart
+            bars={ohlcv?.bars ?? []}
+            currentDate={observation?.date && observation.date !== '[EPISODE COMPLETE]' ? observation.date : null}
+            currentPrice={observation?.price ?? null}
+            range={range}
+          />
         </div>
 
         {/* Council Feed Sidebar */}
@@ -352,172 +479,396 @@ const TerminalView = ({ env }: { env: StockerEnv }) => {
         </div>
       </div>
 
-      {/* Bottom Panel */}
-      <div className="h-32 shrink-0 glass-panel rounded-lg flex overflow-hidden border-[#731fff]/20">
-        <div className="w-48 border-r border-white/5 flex flex-col justify-center px-6 bg-[#731fff]/5 relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-br from-[#731fff]/10 to-transparent pointer-events-none" />
-          <div className="flex items-center gap-1.5 mb-1">
-            <Activity className="w-3 h-3 text-[#731fff]" />
-            <span className="text-[9px] uppercase font-bold tracking-widest text-[#731fff]">Moderator</span>
+      {/* Bottom Panel — swaps to EpisodeCompletePanel when done */}
+      {envState?.done ? (
+        <EpisodeCompletePanel
+          env={env}
+          onRestart={() => envState.task_id && void selectTask(envState.task_id)}
+          onChooseDifferent={() => onSwitchTab('Gallery')}
+        />
+      ) : (
+        <div className="h-32 shrink-0 glass-panel rounded-lg flex overflow-hidden border-[#731fff]/20">
+          <div className="w-48 border-r border-white/5 flex flex-col justify-center px-6 bg-[#731fff]/5 relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-[#731fff]/10 to-transparent pointer-events-none" />
+            <div className="flex items-center gap-1.5 mb-1">
+              <Activity className="w-3 h-3 text-[#731fff]" />
+              <span className="text-[9px] uppercase font-bold tracking-widest text-[#731fff]">Moderator</span>
+            </div>
+            <h3 className="font-bold text-lg text-white">Gemma-4</h3>
+            <span className="text-[10px] text-neutral-500 mt-0.5">
+              Consensus: {consensus >= 0 ? '+' : ''}
+              {consensus.toFixed(2)}
+            </span>
           </div>
-          <h3 className="font-bold text-lg text-white">Gemma-4</h3>
-          <span className="text-[10px] text-neutral-500 mt-0.5">
-            Consensus: {consensus >= 0 ? '+' : ''}
-            {consensus.toFixed(2)}
+          <div className="flex-1 p-6 relative flex flex-col justify-center">
+            <p className="font-mono text-[13px] text-neutral-300 leading-relaxed max-w-3xl">
+              <span className="text-[#731fff] mr-2 opacity-70">&gt;</span>
+              {council?.rationale ?? (observation ? 'Awaiting moderator synthesis.' : 'Run a task to see live moderator output.')}
+              <span className="inline-block w-2.5 h-4 bg-[#731fff] align-middle ml-1 animate-pulse" />
+            </p>
+          </div>
+          <div className="w-72 border-l border-white/5 flex flex-col items-stretch justify-center bg-[#00FF41]/5 backdrop-blur-sm px-4 gap-2">
+            <div className="flex items-center gap-2">
+              <select
+                value={side}
+                onChange={(e) => setSide(e.target.value as Side)}
+                className="bg-black/40 border border-white/10 rounded text-[11px] font-mono px-2 py-1 text-white"
+              >
+                <option value="buy">BUY</option>
+                <option value="sell" disabled={!canSell}>
+                  SELL{canSell ? '' : ' (no position)'}
+                </option>
+                <option value="hold">HOLD</option>
+              </select>
+              <input
+                type="number"
+                min={0}
+                max={side === 'sell' ? position : undefined}
+                value={qty}
+                onChange={(e) => setQty(Math.max(0, parseInt(e.target.value || '0', 10)))}
+                className="w-20 bg-black/40 border border-white/10 rounded text-[11px] font-mono px-2 py-1 text-white"
+              />
+            </div>
+            <button
+              onClick={() => void submitTrade(side, qty)}
+              disabled={submitDisabled}
+              title={
+                side === 'sell' && !canSell
+                  ? 'No position to sell'
+                  : side === 'sell' && qty > position
+                  ? `You only hold ${position} share${position === 1 ? '' : 's'}`
+                  : undefined
+              }
+              className="bg-[#00FF41] disabled:opacity-40 disabled:cursor-not-allowed text-black font-black text-sm px-6 py-2 rounded-md shadow-[0_0_20px_rgba(0,255,65,0.3)] hover:scale-105 transition-transform"
+            >
+              {loading ? 'EXECUTING…' : `${side.toUpperCase()} ${side === 'hold' ? '' : qty}`}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ----------------------------------------------------------- EpisodeComplete
+
+const EpisodeCompletePanel = ({
+  env,
+  onRestart,
+  onChooseDifferent,
+}: {
+  env: StockerEnv;
+  onRestart: () => void;
+  onChooseDifferent: () => void;
+}) => {
+  const { envState, ohlcv, startingCash } = env;
+
+  if (!envState) return null;
+
+  const portfolio = envState.portfolio_value;
+  const pnl = portfolio - startingCash;
+  const pnlPct = startingCash > 0 ? (pnl / startingCash) * 100 : 0;
+
+  // Buy & hold benchmark: as many shares as starting cash buys on the first
+  // in-episode bar, held to the last in-episode bar (no transaction cost).
+  let bhValue: number | null = null;
+  if (ohlcv) {
+    const ep = ohlcv.bars.filter((b) => b.in_episode);
+    if (ep.length >= 2) {
+      const firstClose = ep[0].close;
+      const lastClose = ep[ep.length - 1].close;
+      const shares = Math.floor(startingCash / firstClose);
+      const leftover = startingCash - shares * firstClose;
+      bhValue = leftover + shares * lastClose;
+    }
+  }
+  const alphaAbs = bhValue != null ? portfolio - bhValue : null;
+  const beat = alphaAbs != null ? alphaAbs > 0 : null;
+  const within = alphaAbs != null && Math.abs(alphaAbs) < startingCash * 0.005;
+
+  const totalReward = envState.reward_history.reduce((a, b) => a + b, 0);
+  const trades = envState.action_history.filter((a) => a.side !== 'hold').length;
+
+  const epBars = ohlcv ? ohlcv.bars.filter((b) => b.in_episode) : [];
+  const dateRange =
+    epBars.length >= 2 ? `${epBars[0].time} → ${epBars[epBars.length - 1].time}` : '—';
+  const ticker = ohlcv?.ticker ?? envState.task_id;
+
+  const accent = within ? '#731fff' : beat ? '#00FF41' : '#ffb4ab';
+  const accentName = within ? 'NEUTRAL' : beat ? 'OUTPERFORMED' : 'UNDERPERFORMED';
+
+  return (
+    <div
+      className="h-32 shrink-0 glass-panel rounded-lg flex overflow-hidden relative"
+      style={{ borderColor: `${accent}66`, boxShadow: `0 0 30px ${accent}22` }}
+    >
+      <div
+        className="absolute inset-0 pointer-events-none opacity-20"
+        style={{ background: `radial-gradient(circle at 0% 50%, ${accent}, transparent 60%)` }}
+      />
+      <div className="w-56 border-r border-white/5 flex flex-col justify-center px-6 relative">
+        <div className="flex items-center gap-1.5 mb-1">
+          <Activity className="w-3 h-3" style={{ color: accent }} />
+          <span className="text-[9px] uppercase font-bold tracking-widest" style={{ color: accent }}>
+            Episode Complete
           </span>
         </div>
-        <div className="flex-1 p-6 relative flex flex-col justify-center">
-          <p className="font-mono text-[13px] text-neutral-300 leading-relaxed max-w-3xl">
-            <span className="text-[#731fff] mr-2 opacity-70">&gt;</span>
-            {council?.rationale ?? (observation ? 'Awaiting moderator synthesis.' : 'Run a task to see live moderator output.')}
-            <span className="inline-block w-2.5 h-4 bg-[#731fff] align-middle ml-1 animate-pulse" />
-          </p>
-        </div>
-        <div className="w-72 border-l border-white/5 flex flex-col items-stretch justify-center bg-[#00FF41]/5 backdrop-blur-sm px-4 gap-2">
-          <div className="flex items-center gap-2">
-            <select
-              value={side}
-              onChange={(e) => setSide(e.target.value as Side)}
-              className="bg-black/40 border border-white/10 rounded text-[11px] font-mono px-2 py-1 text-white"
-            >
-              <option value="buy">BUY</option>
-              <option value="sell">SELL</option>
-              <option value="hold">HOLD</option>
-            </select>
-            <input
-              type="number"
-              min={0}
-              value={qty}
-              onChange={(e) => setQty(Math.max(0, parseInt(e.target.value || '0', 10)))}
-              className="w-20 bg-black/40 border border-white/10 rounded text-[11px] font-mono px-2 py-1 text-white"
-            />
-          </div>
-          <button
-            onClick={() => void submitTrade(side, qty)}
-            disabled={submitDisabled}
-            className="bg-[#00FF41] disabled:opacity-40 disabled:cursor-not-allowed text-black font-black text-sm px-6 py-2 rounded-md shadow-[0_0_20px_rgba(0,255,65,0.3)] hover:scale-105 transition-transform"
-          >
-            {loading ? 'EXECUTING…' : `${side.toUpperCase()} ${side === 'hold' ? '' : qty}`}
-          </button>
-        </div>
+        <h3 className="font-bold text-lg text-white">{ticker}</h3>
+        <span className="text-[10px] text-neutral-500 mt-0.5 font-mono">{dateRange}</span>
+        <span className="text-[9px] font-bold tracking-widest mt-1" style={{ color: accent }}>
+          {accentName}
+        </span>
+      </div>
+
+      <div className="flex-1 px-6 flex items-center gap-6 overflow-x-auto">
+        <Stat label="Final NAV" value={`$${portfolio.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} />
+        <Stat
+          label="P&L"
+          value={`${pnl >= 0 ? '+' : ''}$${pnl.toFixed(0)} (${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`}
+          color={pnl >= 0 ? '#00FF41' : '#ffb4ab'}
+        />
+        <Stat
+          label="vs Buy & Hold"
+          value={
+            alphaAbs == null
+              ? '—'
+              : `${alphaAbs >= 0 ? '+' : ''}$${alphaAbs.toFixed(0)}`
+          }
+          color={alphaAbs == null ? undefined : alphaAbs >= 0 ? '#00FF41' : '#ffb4ab'}
+        />
+        <Stat label="Total Reward" value={totalReward.toFixed(3)} />
+        <Stat label="Trades" value={`${trades}`} />
+        <Stat label="Steps" value={`${envState.current_step}/${envState.total_steps}`} />
+      </div>
+
+      <div className="w-64 border-l border-white/5 flex flex-col items-stretch justify-center px-4 gap-2 bg-black/20 shrink-0">
+        <button
+          onClick={onRestart}
+          className="font-bold text-xs px-4 py-2 rounded-md transition-transform hover:scale-[1.02]"
+          style={{ backgroundColor: accent, color: '#000' }}
+        >
+          RESTART TASK
+        </button>
+        <button
+          onClick={onChooseDifferent}
+          className="font-bold text-xs px-4 py-2 rounded-md border border-white/10 text-neutral-300 hover:bg-white/5 transition-colors"
+        >
+          CHOOSE DIFFERENT
+        </button>
       </div>
     </div>
   );
 };
 
+const Stat = ({ label, value, color }: { label: string; value: string; color?: string }) => (
+  <div className="flex flex-col">
+    <span className="text-[9px] font-bold uppercase tracking-widest text-neutral-500 mb-0.5">{label}</span>
+    <span className="font-mono font-bold text-sm whitespace-nowrap" style={{ color: color ?? '#ffffff' }}>
+      {value}
+    </span>
+  </div>
+);
+
 // ----------------------------------------------------------------- CouncilView
+
+// Sentiment label → color (for News card dots)
+const SENT_COLOR: Record<string, string> = {
+  positive: '#00FF41',
+  bullish: '#00FF41',
+  neutral: 'rgb(163,163,163)',
+  negative: '#ffb4ab',
+  bearish: '#ffb4ab',
+};
+
+const SparklineMini = ({ values, color = '#00FF41' }: { values: number[]; color?: string }) => {
+  if (!values || values.length < 2) {
+    return (
+      <div className="h-20 w-full bg-black/40 rounded border border-white/5 flex items-center justify-center">
+        <span className="text-[10px] text-neutral-600 font-mono">no data</span>
+      </div>
+    );
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values
+    .map((v, i) => `${(i / (values.length - 1)) * 100},${100 - ((v - min) / range) * 90 - 5}`)
+    .join(' ');
+  return (
+    <div className="h-20 w-full bg-black/40 rounded border border-white/5 relative overflow-hidden flex items-end p-2 pb-0">
+      <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        <polygon
+          points={`${pts} 100,100 0,100`}
+          fill="url(#spark-grad)"
+        />
+        <defs>
+          <linearGradient id="spark-grad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={color} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  );
+};
 
 const SPECIALIST_VISUALS: Record<
   string,
-  { icon: any; color: string; render: () => any }
+  {
+    icon: any;
+    color: string;
+    render: (obs: MarketObservation | null, vote: import('./api').SpecialistVote | undefined) => any;
+  }
 > = {
   chart_pattern: {
     icon: Zap,
     color: '[#00FF41]',
-    render: () => (
-      <div className="h-20 w-full bg-black/40 rounded border border-white/5 relative overflow-hidden flex items-end p-2 pb-0">
-        <svg className="w-full h-full" viewBox="0 0 100 40" preserveAspectRatio="none">
-          <path d="M0,35 Q10,32 20,38 T40,20 T60,25 T100,5" fill="none" stroke="#00FF41" strokeWidth="2" />
-          <path d="M0,35 Q10,32 20,38 T40,20 T60,25 T100,5 V40 H0 Z" fill="url(#chart-grad)" />
-          <defs>
-            <linearGradient id="chart-grad" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#00FF41" stopOpacity="0.2" />
-              <stop offset="100%" stopColor="#00FF41" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-        </svg>
-      </div>
-    ),
+    render: (obs) => {
+      const last = obs?.price_history?.slice(-30) ?? [];
+      return <SparklineMini values={last} color="#00FF41" />;
+    },
   },
   indicator: {
     icon: LineChart,
     color: '[#00FF41]',
-    render: () => (
-      <div className="space-y-2 py-2">
-        {[
-          { l: 'RSI', v: 62, c: '#00FF41' },
-          { l: 'MACD', v: 70, c: '#00FF41' },
-          { l: 'ATR', v: 35, c: 'white' },
-        ].map((b, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="text-[8px] font-bold text-neutral-500 w-10">{b.l}</span>
-            <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
-              <div className="h-full bg-current transition-all" style={{ width: `${b.v}%`, color: b.c }} />
+    render: (obs) => {
+      const ind = obs?.indicators ?? {};
+      const rsi = typeof ind['rsi14'] === 'number' ? (ind['rsi14'] as number) : null;
+      const macd = typeof ind['macd'] === 'number' ? (ind['macd'] as number) : null;
+      const atr = typeof ind['atr14'] === 'number' ? (ind['atr14'] as number) : null;
+      const lastClose = obs?.price ?? 0;
+      const atrPct = atr && lastClose ? (atr / lastClose) * 100 : null;
+      const rows = [
+        rsi !== null
+          ? { l: 'RSI', text: rsi.toFixed(1), pct: Math.max(0, Math.min(100, rsi)), c: rsi > 70 ? '#ffb4ab' : rsi < 30 ? '#ffb4ab' : '#00FF41' }
+          : { l: 'RSI', text: '—', pct: 0, c: 'rgba(255,255,255,0.2)' },
+        macd !== null
+          ? { l: 'MACD', text: macd.toFixed(2), pct: Math.max(5, Math.min(95, 50 + macd * 20)), c: macd >= 0 ? '#00FF41' : '#ffb4ab' }
+          : { l: 'MACD', text: '—', pct: 0, c: 'rgba(255,255,255,0.2)' },
+        atrPct !== null
+          ? { l: 'ATR%', text: `${atrPct.toFixed(2)}%`, pct: Math.max(0, Math.min(100, atrPct * 20)), c: 'white' }
+          : { l: 'ATR%', text: '—', pct: 0, c: 'rgba(255,255,255,0.2)' },
+      ];
+      return (
+        <div className="space-y-2 py-2">
+          {rows.map((b, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-[8px] font-bold text-neutral-500 w-10">{b.l}</span>
+              <div className="flex-1 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                <div className="h-full bg-current transition-all" style={{ width: `${b.pct}%`, color: b.c }} />
+              </div>
+              <span className="text-[9px] font-mono text-neutral-400 w-12 text-right">{b.text}</span>
             </div>
-          </div>
-        ))}
-      </div>
-    ),
+          ))}
+        </div>
+      );
+    },
   },
   news: {
     icon: Newspaper,
     color: '[#00FF41]',
-    render: () => (
-      <div className="space-y-2 max-h-20 overflow-hidden relative">
-        <div className="flex gap-2 items-start opacity-90">
-          <div className="w-1 h-1 rounded-full bg-[#00FF41] mt-1.5" />
-          <span className="text-[10px] text-neutral-400">Latest sentiment-tagged headlines.</span>
+    render: (obs) => {
+      const items = (obs?.headlines ?? []).slice(0, 3);
+      if (items.length === 0) {
+        return (
+          <div className="h-20 flex items-center justify-center text-[10px] text-neutral-600 font-mono">
+            no headlines this step
+          </div>
+        );
+      }
+      const opacities = ['opacity-90', 'opacity-70', 'opacity-40'];
+      return (
+        <div className="space-y-2 max-h-20 overflow-hidden relative">
+          {items.map((h, i) => {
+            const c = SENT_COLOR[(h.sentiment_label ?? '').toLowerCase()] ?? 'rgb(163,163,163)';
+            return (
+              <div key={i} className={`flex gap-2 items-start ${opacities[i] ?? 'opacity-40'}`}>
+                <div className="w-1 h-1 rounded-full mt-1.5" style={{ backgroundColor: c }} />
+                <span className="text-[10px] text-neutral-400 leading-snug line-clamp-2">{h.headline}</span>
+              </div>
+            );
+          })}
+          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#1c1b1b] pointer-events-none" />
         </div>
-        <div className="flex gap-2 items-start opacity-70">
-          <div className="w-1 h-1 rounded-full bg-[#00FF41] mt-1.5" />
-          <span className="text-[10px] text-neutral-400">Tone aggregated by NewsAgent.</span>
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#1c1b1b]" />
-      </div>
-    ),
+      );
+    },
   },
   forum_sentiment: {
     icon: Users,
     color: 'neutral-400',
-    render: () => (
-      <div className="h-20 w-full bg-black/40 rounded border border-white/5 relative p-2 overflow-hidden">
-        <div className="absolute top-[20%] left-[70%] w-3 h-3 bg-[#00FF41] rounded-full blur-[2px] opacity-60" />
-        <div className="absolute top-[40%] left-[60%] w-2 h-2 bg-[#00FF41] rounded-full blur-[1px] opacity-40" />
-        <div className="absolute top-[10%] left-[80%] w-4 h-4 bg-[#00FF41] rounded-full blur-[3px] opacity-80" />
-        <div className="absolute bottom-2 left-2 right-2 flex justify-between text-[7px] font-bold text-neutral-700 border-t border-white/5 pt-1">
-          <span>BEAR</span>
-          <span>BULL</span>
+    render: (obs) => {
+      const items = (obs?.forum_excerpts ?? []).slice(0, 2);
+      if (items.length === 0) {
+        return (
+          <div className="h-20 flex items-center justify-center text-[10px] text-neutral-600 font-mono">
+            no forum activity this step
+          </div>
+        );
+      }
+      return (
+        <div className="h-20 space-y-1.5 overflow-hidden text-[10px]">
+          {items.map((f, i) => (
+            <div key={i} className="leading-snug">
+              <span className="font-mono text-[#00FF41]">r/{f.subreddit}</span>
+              <span className="text-neutral-600 ml-1">({f.score})</span>
+              <span className="text-neutral-400 ml-1.5 line-clamp-1">{f.post_text}</span>
+            </div>
+          ))}
         </div>
-      </div>
-    ),
+      );
+    },
   },
   peer_commodity: {
     icon: TrendingUp,
     color: '[#00FF41]',
-    render: () => (
-      <div className="grid grid-cols-2 gap-2 h-20">
-        {[
-          { l: 'Peer 1', v: '+1.2% ▲' },
-          { l: 'Peer 2', v: '+0.4%' },
-          { l: 'Peer 3', v: '-0.1%' },
-          { l: 'Comm.', v: '+0.7%' },
-        ].map((m, i) => (
-          <div key={i} className="bg-white/5 rounded p-1.5 flex flex-col justify-center">
-            <span className="text-[7px] font-bold text-neutral-600 uppercase">{m.l}</span>
-            <span className="text-[10px] font-mono text-neutral-300">{m.v}</span>
-          </div>
-        ))}
-      </div>
-    ),
+    render: (obs) => {
+      const peers = (obs?.peers?.peers ?? []).slice(0, 3);
+      const com = obs?.peers?.commodity;
+      const comPrice = obs?.peers?.commodity_price;
+      const cells: Array<{ l: string; v: string }> = peers.map((p) => ({
+        l: p.peer_ticker,
+        v: p.peer_close != null ? `$${p.peer_close.toFixed(2)}` : '—',
+      }));
+      if (com && comPrice != null) {
+        cells.push({ l: com.toUpperCase().slice(0, 5), v: `$${comPrice.toFixed(0)}` });
+      }
+      while (cells.length < 4) cells.push({ l: '—', v: '—' });
+      return (
+        <div className="grid grid-cols-2 gap-2 h-20">
+          {cells.slice(0, 4).map((m, i) => (
+            <div key={i} className="bg-white/5 rounded p-1.5 flex flex-col justify-center">
+              <span className="text-[7px] font-bold text-neutral-600 uppercase">{m.l}</span>
+              <span className="text-[10px] font-mono text-neutral-300">{m.v}</span>
+            </div>
+          ))}
+        </div>
+      );
+    },
   },
   geopolitics: {
     icon: Globe,
     color: 'neutral-400',
-    render: () => (
-      <div className="grid grid-cols-2 gap-2 h-20">
-        {[
-          { l: 'DXY', v: '104.2 ▲' },
-          { l: '10Y', v: '4.32% ▲' },
-          { l: 'SPX', v: '-0.2%' },
-          { l: 'VIX', v: '14.1' },
-        ].map((m, i) => (
-          <div key={i} className="bg-white/5 rounded p-1.5 flex flex-col justify-center">
-            <span className="text-[7px] font-bold text-neutral-600 uppercase">{m.l}</span>
-            <span className="text-[10px] font-mono text-neutral-300">{m.v}</span>
+    render: (obs) => {
+      const items = (obs?.macro ?? []).slice(0, 4);
+      if (items.length === 0) {
+        return (
+          <div className="h-20 flex items-center justify-center text-[10px] text-neutral-600 font-mono">
+            no macro headlines
           </div>
-        ))}
-      </div>
-    ),
+        );
+      }
+      return (
+        <div className="grid grid-cols-2 gap-2 h-20">
+          {items.map((m, i) => (
+            <div key={i} className="bg-white/5 rounded p-1.5 flex flex-col justify-center overflow-hidden">
+              <span className="text-[7px] font-bold text-neutral-600 uppercase">{m.country}</span>
+              <span className="text-[9px] text-neutral-300 line-clamp-2 leading-tight">{m.headline}</span>
+            </div>
+          ))}
+        </div>
+      );
+    },
   },
   seasonal_trend: {
     icon: Calendar,
@@ -527,7 +878,7 @@ const SPECIALIST_VISUALS: Record<
         {[30, 45, 35, 60, 55, 70, 50, 65, 75, 60, 80, 72].map((h, i) => (
           <div key={i} className="flex-1 bg-[#00FF41]/40 rounded-t-sm" style={{ height: `${h}%` }} />
         ))}
-        <div className="absolute top-1 right-2 text-[8px] font-bold text-neutral-600 uppercase tracking-widest">12mo avg</div>
+        <div className="absolute top-1 right-2 text-[8px] font-bold text-neutral-600 uppercase tracking-widest">stylized</div>
       </div>
     ),
   },
@@ -634,7 +985,7 @@ const CouncilView = ({ env }: { env: StockerEnv }) => {
               stat={stat}
               color={visual.color}
             >
-              {visual.render()}
+              {visual.render(observation, vote)}
               <p className="text-xs text-neutral-500 leading-snug">
                 {vote?.rationale ?? 'Awaiting council vote — run a task in Gallery.'}
               </p>
@@ -1401,8 +1752,6 @@ const IntelligenceView = ({ env }: { env: StockerEnv }) => {
 
 // ------------------------------------------------------------------------- App
 
-type Tab = 'Terminal' | 'Council' | 'Training' | 'Gallery' | 'Portfolio' | 'Intelligence';
-
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Terminal');
   const env = useStockerEnv();
@@ -1415,7 +1764,7 @@ export default function App() {
   const renderView = () => {
     switch (activeTab) {
       case 'Terminal':
-        return <TerminalView env={env} />;
+        return <TerminalView env={env} onSwitchTab={setActiveTab} />;
       case 'Council':
         return <CouncilView env={env} />;
       case 'Training':
@@ -1427,7 +1776,7 @@ export default function App() {
       case 'Intelligence':
         return <IntelligenceView env={env} />;
       default:
-        return <TerminalView env={env} />;
+        return <TerminalView env={env} onSwitchTab={setActiveTab} />;
     }
   };
 
