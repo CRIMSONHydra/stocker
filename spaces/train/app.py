@@ -59,12 +59,14 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 2 — baseline eval (no LoRA)
+    # Phase 2 — baseline eval (no LoRA). Hits the 26B endpoint, but
+    # specialist votes are already cached from Phase 1 so this is fast.
     _state["phase"] = "eval_pre"
     _stream_proc(
         [sys.executable, "-m", "training.eval_rollout",
-         "--tasks", "task_easy", "--mock",   # mock for eval speed; swap for real if endpoint cached
+         "--tasks", "task_easy",
          "--out", "training/runs/eval_pre"],
+        env_extra=endpoint_env,
     )
 
     # Phase 3 — GRPO training on E4B (fits on L4 24 GB)
@@ -83,7 +85,8 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 4 — post-training eval
+    # Phase 4 — post-training eval (with the trained LoRA loaded into the
+    # moderator path; specialist votes still come from cache).
     _state["phase"] = "eval_post"
     run_dirs = sorted(glob.glob(str(WORKDIR / "training/runs/grpo_*")))
     if run_dirs:
@@ -91,9 +94,9 @@ def _run_pipeline() -> None:
         _stream_proc(
             [sys.executable, "-m", "training.eval_rollout",
              "--tasks", "task_easy",
-             "--mock",
              "--moderator-lora", str(lora_dir),
              "--out", "training/runs/eval_post"],
+            env_extra=endpoint_env,
         )
 
     # Phase 5 — compile results

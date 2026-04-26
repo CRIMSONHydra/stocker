@@ -1,3 +1,12 @@
+# ── Stage 1: build the React frontend (Vite + React 19 + Tailwind v4) ──────
+FROM node:20-slim AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY frontend/ ./
+RUN npm run build
+
+# ── Stage 2: Python runtime ────────────────────────────────────────────────
 FROM python:3.13-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -14,6 +23,9 @@ COPY app/ /app/app/
 COPY server/ /app/server/
 COPY data/ /app/data/
 COPY inference.py client.py /app/
+
+# Pull in the built frontend so FastAPI mounts the React SPA at /web
+COPY --from=frontend-builder /frontend/dist /app/frontend/dist
 
 RUN adduser --disabled-password --gecos "" appuser && \
     chown -R appuser:appuser /app
