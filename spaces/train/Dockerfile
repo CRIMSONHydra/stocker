@@ -21,7 +21,12 @@ RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends git curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
-# Clone the stocker repo (always pulls latest main)
+# Bust cache when main branch advances on GitHub. The ADD layer fetches
+# the latest commit metadata; its body changes on every commit, which
+# invalidates all subsequent RUN layers (including the git clone below).
+ADD https://api.github.com/repos/CRIMSONHydra/stocker/commits/main /tmp/.commit-sha
+
+# Clone the stocker repo (latest main, no stale Docker cache)
 RUN git clone --depth=1 https://github.com/CRIMSONHydra/stocker.git /app
 
 # Install uv + all required extras + gradio for the UI
