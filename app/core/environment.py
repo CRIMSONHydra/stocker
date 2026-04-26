@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 
+from app.config import settings
 from app.core.graders import compute_step_reward, compute_trajectory_bonus
 from app.core.tasks import get_task_definition
 from app.data import loader
@@ -85,16 +86,19 @@ class StockerEnv:
             )
 
         price = self._prices[self._current_index]
-        prev_portfolio = self._cash + self._position * price
         invalid = self._apply_action(action, price)
         new_portfolio = self._cash + self._position * price
 
         result = compute_step_reward(
             action=action,
-            prev_portfolio=prev_portfolio,
             new_portfolio=new_portfolio,
             starting_cash=float(self._task["starting_cash"]),
             invalid=invalid,
+            step_index=self._current_index,
+            total_steps=len(self._prices),
+            ideal_pnl_pct_series=self._task.get("ideal_pnl_pct_series", []),
+            ideal_pnl_pct_total=float(self._task.get("ideal_pnl_pct_total", 0.0)),
+            settings=settings,
         )
         reward = result.score
 
@@ -134,6 +138,19 @@ class StockerEnv:
             },
         )
 
+    # ----------------------------------------------------------------- public
+    def is_ready(self) -> bool:
+        """True if the env has been reset and the episode is still live."""
+        return bool(self._prices) and not self._done
+
+    def current_observation(self) -> MarketObservation:
+        """Public accessor for the agent-visible observation at the current step."""
+        if not self._prices:
+            raise RuntimeError("env has not been reset yet")
+        if self._done:
+            return self._terminal_observation()
+        return self._build_observation(self._current_index)
+
     # ------------------------------------------------------------------ state
     def state(self) -> EnvironmentState:
         price = (
@@ -166,22 +183,30 @@ class StockerEnv:
 
     # ---------------------------------------------------------------- helpers
     def _apply_action(self, action: TradeAction, price: float) -> bool:
-        """Apply trade. Returns True if invalid (insufficient cash/position)."""
+        """Apply trade. Returns True if invalid (insufficient cash/position).
+
+        Buys and sells incur a transaction cost equal to
+        settings.transaction_cost_rate * trade_notional, deducted from cash.
+        """
         if action.side == "hold" or action.quantity <= 0:
             return False
 
+        rate = settings.transaction_cost_rate
+
         if action.side == "buy":
-            cost = action.quantity * price
-            if cost > self._cash:
+            notional = action.quantity * price
+            total_cost = notional * (1.0 + rate)
+            if total_cost > self._cash:
                 return True
-            self._cash -= cost
+            self._cash -= total_cost
             self._position += action.quantity
             return False
 
         if action.side == "sell":
             if action.quantity > self._position:
                 return True
-            self._cash += action.quantity * price
+            notional = action.quantity * price
+            self._cash += notional * (1.0 - rate)
             self._position -= action.quantity
             return False
 
