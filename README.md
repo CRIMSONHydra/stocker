@@ -177,17 +177,18 @@ via `trl.GRPOTrainer` with a LoRA adapter (rank 16) on Gemma 4 E4B IT.
 **Dataset:** `task_easy` (43 moderator prompts, each containing 7 specialist
 votes and the current market state).
 
-**Settings** (T4-tuned for the free Colab runtime):
+**Settings** (L4-tuned for the HF training Space):
 
 | Parameter | Value |
 |-----------|-------|
-| Base model | `google/gemma-4-E4B-it` (4-bit BnB) |
+| Base model | `google/gemma-4-E4B-it` (4-bit BnB, ~3 GB) |
+| Inference (specialists + production) | `ggml-org/gemma-4-26B-A4B-it-GGUF` via HF endpoint (llama.cpp) |
 | LoRA rank / alpha | 16 / 32 |
 | Epochs | 3 |
 | `num_generations` | 4 |
 | `per_device_train_batch_size` | 4 |
 | Learning rate | 5e-6 |
-| Compute | Colab T4 (16 GB VRAM) |
+| Compute | HF Space, Nvidia L4 24 GB (~$0.80 / training run) |
 
 Each GRPO step: sample 4 moderator completions per prompt → parse each into
 `TradeAction` → simulate env step → compare rewards → update LoRA. Specialist
@@ -217,44 +218,52 @@ default:                                →  total=+0.3801
 
 ## Quick start
 
+### A. Hit the running env Space (zero-setup, recommended for graders)
+
+The OpenEnv contract is live at the HF Space — interact with `/reset`, `/step`,
+`/state` directly:
+
 ```bash
-# 1. Install (CPU-only deps)
+# Reset to task_easy
+curl -X POST https://hydr473-stocker.hf.space/reset \
+     -H "Content-Type: application/json" \
+     -d '{"task_id": "task_easy"}'
+
+# Submit a trade
+curl -X POST https://hydr473-stocker.hf.space/step \
+     -H "Content-Type: application/json" \
+     -d '{"side": "buy", "quantity": 10}'
+```
+
+Or open `https://hydr473-stocker.hf.space/web` for the interactive React UI
+(six tabs: Terminal, Council, Training, Gallery, Portfolio, Intelligence).
+
+### B. Run GRPO training (one click on the L4 GPU Space)
+
+Open [Hydr473/stocker-train](https://huggingface.co/spaces/Hydr473/stocker-train)
+and click **🚀 Launch Pipeline**. The Gradio UI streams the full 6-phase run
+(precache → eval_pre → GRPO → eval_post → compile → upload) and uploads the
+final plots + LoRA adapter to [Hydr473/stocker-results](https://huggingface.co/datasets/Hydr473/stocker-results).
+Cost: ~$0.80 / run on the L4.
+
+### C. Local development (mock client, no GPU)
+
+```bash
 pip install uv
 uv pip install -e ".[dev,data,eval]"
-
-# 2. Build the bundled dataset (yfinance + indicators + chart PNGs)
 python scripts/build_dataset.py
 python scripts/validate_tasks.py
 
-# 3. Smoke-test with the deterministic mock client (no GPU, no API key)
+# Deterministic offline smoke (no LLM calls)
 python inference.py --task all --mock --no-cache
 
-# 4. Local server + interactive frontend
-./run.sh
-# http://localhost:7860/web
-
-# 5. Real run — Gemma 4 E4B IT via vLLM (local)
-./scripts/serve_vllm.sh
-export API_BASE_URL=http://localhost:8000/v1
-export MODEL_NAME=google/gemma-4-E4B-it
-python inference.py --task all
+# Local server + React UI
+./run.sh   # http://localhost:7860/web
+pytest tests/ -q
 ```
 
-### Colab T4 (recommended path)
-
-Open [training/train_grpo.ipynb](training/train_grpo.ipynb):
-
-1. `Runtime → Change runtime type → T4 GPU`
-2. Run all cells in order: install → clone → auth (HF token) → build data →
-   load Gemma → precache → baseline eval → train (~25 min) → post eval → compile
-
-### VSCode-over-tunnel
-
-Run [training/colab_launcher.ipynb](training/colab_launcher.ipynb) on Colab.
-It clones the repo, installs deps, builds the dataset, then exposes a Jupyter
-server through a `cloudflared` tunnel and prints the URL. In VSCode, paste the
-URL into *Jupyter: Specify Jupyter Server for Connections*. Edit notebooks
-locally; execution happens on the Colab T4.
+To run the council against your own endpoint, set `API_BASE_URL`,
+`MODEL_NAME`, and `HF_TOKEN` (see [.env.example](.env.example)).
 
 ---
 
@@ -317,16 +326,23 @@ python scripts/compile_results.py
 │   ├── build_ideal_profit.py # per-task optimal PnL trajectory
 │   ├── build_corpus.py      # large corpus (optional, gitignored)
 │   ├── compile_results.py   # compile training artifacts → RESULTS.md
+│   ├── precache_endpoint.py # standalone specialist pre-cache via endpoint
 │   └── validate_tasks.py
 ├── training/
-│   ├── train_grpo.py        # GRPO trainer (CLI)
-│   ├── train_grpo.ipynb     # end-to-end Colab notebook
+│   ├── train_grpo.py        # GRPO trainer (CLI, --tasks filter)
+│   ├── train_grpo.ipynb     # end-to-end Colab/Jupyter notebook
 │   ├── tune_easy_gemma4.ipynb  # reward-weight tuning bench
 │   ├── eval_rollout.py      # offline backtest → reward/portfolio curves
 │   └── runs/                # gitignored (except .gitkeep)
+├── spaces/
+│   └── train/               # Gradio app for the L4 GPU training Space
+│       ├── Dockerfile       # CUDA + PyTorch + git clone of this repo
+│       └── app.py           # 6-phase pipeline: precache → eval → GRPO → upload
+├── .github/workflows/
+│   └── deploy_spaces.yml    # CI: auto-deploy both Spaces on push to main
 ├── inference.py             # council-driven OpenEnv inference loop
 ├── tests/
-├── Dockerfile
+├── Dockerfile               # multi-stage: build React UI → Python runtime
 └── pyproject.toml
 ```
 

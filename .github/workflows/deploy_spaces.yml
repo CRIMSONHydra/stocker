@@ -14,6 +14,22 @@ jobs:
           fetch-depth: 0
           lfs: true
 
+      - name: Ensure Space exists
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install --quiet "huggingface_hub>=1.10"
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          HfApi(token=os.environ["HF_TOKEN"]).create_repo(
+              repo_id="Hydr473/stocker",
+              repo_type="space",
+              space_sdk="docker",
+              exist_ok=True,
+          )
+          PY
+
       - name: Push to Hydr473/stocker Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -27,6 +43,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure Space exists
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install --quiet "huggingface_hub>=1.10"
+          python - <<'PY'
+          import os
+          from huggingface_hub import HfApi
+          HfApi(token=os.environ["HF_TOKEN"]).create_repo(
+              repo_id="Hydr473/stocker-train",
+              repo_type="space",
+              space_sdk="docker",
+              exist_ok=True,
+          )
+          PY
 
       - name: Push Dockerfile to Hydr473/stocker-train Space
         env:
