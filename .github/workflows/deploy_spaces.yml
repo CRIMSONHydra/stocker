@@ -4,6 +4,16 @@ on:
   push:
     branches: [main]
 
+# Non-sensitive config — hardcoded here so the only required GitHub secret
+# is HF_TOKEN. Edit these in-place if your endpoint URL or model changes.
+env:
+  HF_USERNAME:    Hydr473
+  ENV_SPACE:      Hydr473/stocker
+  TRAIN_SPACE:    Hydr473/stocker-train
+  API_BASE_URL:   https://at0e6z2u64774tc7.us-east-1.aws.endpoints.huggingface.cloud/v1
+  MODEL_NAME:     ggml-org/gemma-4-26B-A4B-it-GGUF
+  RESULTS_REPO:   Hydr473/stocker-results
+
 jobs:
   deploy-env-space:
     name: Deploy environment Space
@@ -16,30 +26,29 @@ jobs:
 
       - name: Ensure Space exists + set secrets
         env:
-          HF_TOKEN:     ${{ secrets.HF_TOKEN }}
-          API_BASE_URL: ${{ secrets.HF_API_BASE_URL }}
-          MODEL_NAME:   ${{ secrets.HF_MODEL_NAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           pip install --quiet "huggingface_hub>=1.10"
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ["HF_TOKEN"])
-          repo = "Hydr473/stocker"
+          repo = os.environ["ENV_SPACE"]
           api.create_repo(repo_id=repo, repo_type="space", space_sdk="docker", exist_ok=True)
-          # Optional secrets — env Space only needs them if /inference is hit
+          # Optional — env Space only needs LLM creds if /inference is hit
           for k in ("HF_TOKEN", "API_BASE_URL", "MODEL_NAME"):
               v = os.environ.get(k, "")
               if v:
                   api.add_space_secret(repo_id=repo, key=k, value=v)
+                  print(f"  [{repo}] set secret {k}")
           PY
 
-      - name: Push to Hydr473/stocker Space
+      - name: Push to env Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git remote add hf-space \
-            https://Hydr473:${HF_TOKEN}@huggingface.co/spaces/Hydr473/stocker
+            https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${ENV_SPACE}
           git push hf-space main --force
 
   deploy-train-space:
@@ -50,32 +59,28 @@ jobs:
 
       - name: Ensure Space exists + set secrets
         env:
-          HF_TOKEN:     ${{ secrets.HF_TOKEN }}
-          API_BASE_URL: ${{ secrets.HF_API_BASE_URL }}
-          MODEL_NAME:   ${{ secrets.HF_MODEL_NAME }}
-          RESULTS_REPO: ${{ secrets.HF_RESULTS_REPO }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           pip install --quiet "huggingface_hub>=1.10"
           python - <<'PY'
           import os
           from huggingface_hub import HfApi
           api = HfApi(token=os.environ["HF_TOKEN"])
-          repo = "Hydr473/stocker-train"
+          repo = os.environ["TRAIN_SPACE"]
           api.create_repo(repo_id=repo, repo_type="space", space_sdk="docker", exist_ok=True)
-          # Required secrets for the training pipeline
           for k in ("HF_TOKEN", "API_BASE_URL", "MODEL_NAME", "RESULTS_REPO"):
               v = os.environ.get(k, "")
               if v:
                   api.add_space_secret(repo_id=repo, key=k, value=v)
-                  print(f"  set secret {k}")
+                  print(f"  [{repo}] set secret {k}")
           PY
 
-      - name: Push Dockerfile to Hydr473/stocker-train Space
+      - name: Push Dockerfile to train Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git clone \
-            https://Hydr473:${HF_TOKEN}@huggingface.co/spaces/Hydr473/stocker-train \
+            https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${TRAIN_SPACE} \
             /tmp/train-space
           cp spaces/train/Dockerfile /tmp/train-space/Dockerfile
           cp spaces/train/app.py     /tmp/train-space/app.py
