@@ -51,20 +51,27 @@ def _run_pipeline() -> None:
         "MODEL_NAME":   os.getenv("MODEL_NAME", ""),
         "HF_TOKEN":     os.getenv("HF_TOKEN", ""),
     }
+    # Set USE_MOCK_SPECIALISTS=1 in Space variables to use deterministic
+    # MockLLMClient stubs everywhere — useful when the inference endpoint
+    # is throwing 503s. Training itself is still real GRPO; only the
+    # specialist vote inputs are deterministic.
+    use_mock = os.getenv("USE_MOCK_SPECIALISTS", "0") == "1"
+    mock_flag = ["--mock"] if use_mock else []
+    train_mock_flag = ["--mock-specialists"] if use_mock else []
 
-    # Phase 1 — pre-cache specialist votes via HF inference endpoint
+    # Phase 1 — pre-cache specialist votes
     _state["phase"] = "precaching"
     _stream_proc(
-        [sys.executable, "scripts/precache_endpoint.py", "--tasks", "task_easy"],
+        [sys.executable, "scripts/precache_endpoint.py",
+         "--tasks", "task_easy", *mock_flag],
         env_extra=endpoint_env,
     )
 
-    # Phase 2 — baseline eval (no LoRA). Hits the 26B endpoint, but
-    # specialist votes are already cached from Phase 1 so this is fast.
+    # Phase 2 — baseline eval (no LoRA)
     _state["phase"] = "eval_pre"
     _stream_proc(
         [sys.executable, "-m", "training.eval_rollout",
-         "--tasks", "task_easy",
+         "--tasks", "task_easy", *mock_flag,
          "--out", "training/runs/eval_pre"],
         env_extra=endpoint_env,
     )
@@ -74,7 +81,7 @@ def _run_pipeline() -> None:
     _state["phase"] = "training"
     _stream_proc(
         [sys.executable, "-m", "training.train_grpo",
-         "--tasks", "task_easy",
+         "--tasks", "task_easy", *train_mock_flag,
          "--model", "google/gemma-4-E4B-it",
          "--epochs", "3",
          "--num-generations", "4",
@@ -85,15 +92,14 @@ def _run_pipeline() -> None:
         env_extra=endpoint_env,
     )
 
-    # Phase 4 — post-training eval (with the trained LoRA loaded into the
-    # moderator path; specialist votes still come from cache).
+    # Phase 4 — post-training eval (with the trained LoRA)
     _state["phase"] = "eval_post"
     run_dirs = sorted(glob.glob(str(WORKDIR / "training/runs/grpo_*")))
     if run_dirs:
         lora_dir = Path(run_dirs[-1]) / "moderator-lora"
         _stream_proc(
             [sys.executable, "-m", "training.eval_rollout",
-             "--tasks", "task_easy",
+             "--tasks", "task_easy", *mock_flag,
              "--moderator-lora", str(lora_dir),
              "--out", "training/runs/eval_post"],
             env_extra=endpoint_env,
