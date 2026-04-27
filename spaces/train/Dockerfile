@@ -45,7 +45,11 @@ RUN pip install --no-cache-dir uv
 # across both indexes. (Verified via uv pip install --dry-run locally.)
 # UV_HTTP_TIMEOUT=600 gives slow network 10 min per request before retry.
 ENV UV_HTTP_TIMEOUT=600
-RUN uv pip install --index-strategy unsafe-best-match \
+# BuildKit cache mount preserves downloaded wheels across `docker build`
+# invocations. If a build is cancelled mid-download, the next attempt
+# resumes from cache instead of re-fetching ~5 GB of torch + CUDA libs.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --index-strategy unsafe-best-match \
     --extra-index-url https://download.pytorch.org/whl/cu126 \
     "fastapi" "uvicorn[standard]" "pydantic>=2.0" "pydantic-settings" \
     "openai" "openenv-core" "pandas" "pyarrow" "pillow" "markdown-it-py" \
