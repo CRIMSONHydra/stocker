@@ -1,5 +1,15 @@
 # CLAUDE.md
 
+## Source-control rules (non-negotiable)
+
+- **Never `git commit` or `git push` without an explicit, in-message instruction
+  from the user.** "Iterate the Dockerfile until green," "fix the bug," etc. do
+  NOT authorize commits. Make the edits, run tests, and stop.
+- Show the user `git status --short` and `git diff --stat` so they can review
+  before committing manually.
+- Auto mode does NOT relax this rule — code changes are fine, but writing to
+  the git index or pushing to remotes always requires explicit user say-so.
+
 ## Project Overview
 **Stocker** — multi-agent council RL environment for stock trading on
 OpenEnv. Seven specialist LLM analysts vote each step; a moderator LLM

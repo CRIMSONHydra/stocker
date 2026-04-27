@@ -39,6 +39,8 @@ def compute_step_reward(
     ideal_pnl_pct_series: list[float],
     ideal_pnl_pct_total: float,
     settings: Settings,
+    prices: list[float] | None = None,
+    position_after: int = 0,
 ) -> RewardResult:
     breakdown: dict[str, float] = {}
 
@@ -75,8 +77,10 @@ def compute_step_reward(
         # Close to ideal — high reward decaying linearly toward 0.
         performance_factor = 1.0 - gap / scale
     else:
-        # Far behind ideal — punishment down to -1.0.
-        performance_factor = -min(1.0, (gap - scale) / scale)
+        # Far behind ideal — sharper ramp into punishment so the agent
+        # actually feels under-performance (was -min(1, (gap-scale)/scale),
+        # now -min(1, 2*(gap-scale)/scale) → reaches -1.0 at half the gap).
+        performance_factor = -min(1.0, 2.0 * (gap - scale) / scale)
 
     breakdown["ideal_pnl_pct_at_step"] = round(ideal_at_step, 6)
     breakdown["gap"] = round(gap, 6)
@@ -91,6 +95,38 @@ def compute_step_reward(
     breakdown["weighted_inflation"] = round(weighted_inf, 6)
 
     score = weighted_perf + weighted_inf
+
+    # ── Lookahead bonus ──────────────────────────────────────────────────
+    # Single-step reward is nearly invariant to action when the trade is at
+    # fair market value. The lookahead term gives a directional signal:
+    # "would buying here have been profitable over the next K days?"
+    # Active only when prices are passed (training path).
+    lookahead_bonus = 0.0
+    K = getattr(settings, "lookahead_steps", 0)
+    W = getattr(settings, "lookahead_weight", 0.0)
+    if prices and K > 0 and W > 0.0 and step_index + K < len(prices):
+        cur_price = prices[step_index]
+        future_price = prices[step_index + K]
+        if cur_price > 0:
+            future_pct = (future_price - cur_price) / cur_price
+            # Net exposure delta: position the trade ADDED. buy(q) = +q,
+            # sell(q) = -q (relative to starting). Hold = 0 → no bonus.
+            if action.side == "buy":
+                exposure = action.quantity
+            elif action.side == "sell":
+                exposure = -action.quantity
+            else:
+                exposure = 0
+            # Normalize by starting_cash / cur_price to keep magnitude sane
+            # across tickers / cash sizes.
+            shares_per_unit = max(starting_cash / max(cur_price, 1e-9), 1.0)
+            lookahead_bonus = W * future_pct * (exposure / shares_per_unit)
+            # Clip the lookahead bonus to [-1, 1] so it doesn't dominate.
+            lookahead_bonus = max(-1.0, min(1.0, lookahead_bonus))
+            breakdown["lookahead_pct"] = round(future_pct, 6)
+            breakdown["lookahead_exposure"] = exposure
+            breakdown["lookahead_bonus"] = round(lookahead_bonus, 6)
+            score += lookahead_bonus
 
     if invalid:
         score -= INVALID_ACTION_PENALTY

@@ -57,7 +57,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     "torch==2.10.0" "torchvision==0.25.0" "torchaudio==2.10.0" \
     "transformers==5.6.2" "peft==0.19.1" "trl==1.2.0" \
     "accelerate==1.13.0" "bitsandbytes==0.49.2" "datasets==4.8.4" \
-    "tensorboard==2.20.0" "torchao==0.17.0" "huggingface_hub==1.12.0"
+    "tensorboard==2.20.0" "torchao==0.17.0" "huggingface_hub==1.12.0" \
+    "gradio==5.50.0"
 
 # ─── Layer 4: build-time smoke test ────────────────────────────────────
 # Fails the build immediately if any pin combination is broken.

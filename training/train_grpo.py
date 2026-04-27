@@ -91,14 +91,111 @@ def build_prompt_dataset(
     return rows
 
 
+PARSE_FAILURE_PENALTY = 0.1  # explicit penalty for malformed JSON output
+
+
+def _derive_ideal_action(snapshot: dict) -> dict:
+    """Greedy-hindsight ideal action for a snapshot. Looks at the price
+    `lookahead_steps` ahead and returns buy when price will rise, sell
+    when price will fall, hold otherwise. Used for imitation pretrain only.
+    """
+    from app.config import settings as global_settings
+    from app.core.tasks import get_task_definition
+
+    task = get_task_definition(snapshot["task_id"])
+    prices = task["prices"]
+    step = snapshot["step_index"]
+    K = max(1, int(getattr(global_settings, "lookahead_steps", 5)))
+    if step + K >= len(prices):
+        return {"side": "hold", "quantity": 0,
+                "rationale": "End of episode — hold."}
+
+    cur, fut = prices[step], prices[step + K]
+    pct = (fut - cur) / max(cur, 1e-9)
+    state = snapshot["env_state"]
+    cash = state.get("cash", 10000)
+    pos = state.get("position", 0)
+    max_buy = int(cash // max(cur, 1e-9))
+
+    if pct > 0.005 and max_buy > 0:
+        qty = max(1, max_buy // 2)
+        return {"side": "buy", "quantity": qty,
+                "rationale": f"+{pct:.2%} forecast over next {K} bars — buy."}
+    if pct < -0.005 and pos > 0:
+        return {"side": "sell", "quantity": pos,
+                "rationale": f"{pct:.2%} forecast over next {K} bars — exit."}
+    return {"side": "hold", "quantity": 0,
+            "rationale": "Flat forecast — hold."}
+
+
+def _imitation_pretrain(base_model, tokenizer, dataset, run_dir, args) -> None:
+    """One-pass SFT on (prompt → ideal-action JSON) pairs. Cheap warmstart
+    so GRPO starts with at least valid JSON output and a sensible prior."""
+    import json as _json
+    from datasets import Dataset
+    from peft import LoraConfig, get_peft_model
+    from trl import SFTConfig, SFTTrainer
+
+    # IMPORTANT: must attach a LoRA adapter BEFORE SFT, or the 4-bit base
+    # weights are frozen and there's nothing to train. Same lora_cfg shape
+    # GRPO will use later; trainer.save_model preserves it.
+    sft_lora = LoraConfig(
+        r=args.lora_rank, lora_alpha=args.lora_rank * 2,
+        target_modules="all-linear", bias="none", task_type="CAUSAL_LM",
+    )
+
+    rows = []
+    for r in dataset:
+        prompt = tokenizer.apply_chat_template(
+            r["messages"], tokenize=False, add_generation_prompt=True
+        )
+        ideal = _derive_ideal_action(r)
+        completion = _json.dumps(ideal)
+        rows.append({"text": prompt + completion})
+    sft_ds = Dataset.from_list(rows)
+    print(f"[grpo] Imitation pretrain on {len(rows)} (prompt → ideal-action) pairs ...")
+
+    sft_cfg = SFTConfig(
+        output_dir=str(run_dir / "sft_warmstart"),
+        per_device_train_batch_size=args.batch_size,
+        gradient_accumulation_steps=args.grad_accum,
+        learning_rate=args.lr * 4,            # warmstart can use a higher LR
+        num_train_epochs=1,
+        logging_dir=str(run_dir / "tensorboard_sft"),
+        report_to=["tensorboard"],
+        save_strategy="no",
+        bf16=base_model.dtype == __import__("torch").bfloat16,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
+        seed=args.seed,
+    )
+    sft_trainer = SFTTrainer(
+        model=base_model,
+        processing_class=tokenizer,
+        args=sft_cfg,
+        train_dataset=sft_ds,
+        peft_config=sft_lora,
+    )
+    sft_trainer.train()
+    print("[grpo] Imitation pretrain done. Continuing to GRPO ...")
+
+
 def reward_for_completion(completion_text: str, snapshot: dict) -> float:
-    """Replay env to the given step, apply the completion's action, and
-    return the env reward."""
+    """Replay env to the snapshot, apply the completion's action, then roll
+    forward `rollout_horizon` steps with `hold` so the consequences of the
+    action (price moves while holding the new position) accumulate into the
+    reward. Without this multi-step rollout, single-step reward is nearly
+    invariant to action and GRPO has no advantage signal.
+
+    Also applies an explicit parse-failure penalty so the model learns to
+    output valid JSON instead of getting silently defaulted to hold(0)."""
+    from app.config import settings as global_settings
     from app.council.llm import parse_json_object
     from app.core.environment import StockerEnv
     from app.models import EnvironmentState, TradeAction
 
     parsed = parse_json_object(completion_text)
+    parse_failed = not parsed  # empty dict from parse_json_object means malformed JSON
     side = str(parsed.get("side", "hold")).lower()
     if side not in ("buy", "sell", "hold"):
         side = "hold"
@@ -111,19 +208,66 @@ def reward_for_completion(completion_text: str, snapshot: dict) -> float:
     env.reset()
     env.load_snapshot(EnvironmentState(**snapshot["env_state"]))
     result = env.step(TradeAction(side=side, quantity=qty))
-    return float(result.reward)
+    cum_reward = float(result.reward)
+
+    # Roll forward with `hold` so the position taken is actually marked-to-
+    # market over future bars. This is what gives the agent a real signal
+    # that buying at low prices / selling at high prices is good.
+    horizon = int(getattr(global_settings, "rollout_horizon", 5))
+    steps_done = 0
+    while steps_done < horizon and not result.done:
+        result = env.step(TradeAction(side="hold", quantity=0))
+        cum_reward += float(result.reward)
+        steps_done += 1
+
+    if parse_failed:
+        cum_reward -= PARSE_FAILURE_PENALTY
+
+    return cum_reward
 
 
 # ---------------------------------------------------------------------------
 def run_grpo(args, run_dir: Path, dataset):
     import torch
     from datasets import Dataset
-    from peft import LoraConfig
-    from transformers import AutoTokenizer
+    from peft import LoraConfig, prepare_model_for_kbit_training
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from trl import GRPOConfig, GRPOTrainer
 
     model_id = args.model
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+    # GPU path: load in 4-bit so base + LoRA + reference + activations all
+    # fit in 24 GB on the L4. Without this the bf16 model alone is ~8 GB and
+    # GRPO's reference copy + KV cache + activations OOMs.
+    # CPU path: skip BnB (CUDA-only), load in fp32. Used only for end-to-end
+    # code-path tests with a tiny model — actual training needs GPU.
+    if torch.cuda.is_available():
+        bnb_compute_dtype = (
+            torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        )
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=bnb_compute_dtype,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+        )
+        print(f"[grpo] Loading {model_id} in 4-bit (compute dtype={bnb_compute_dtype}) ...")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            quantization_config=bnb_config,
+            device_map={"": 0},
+            torch_dtype=bnb_compute_dtype,
+        )
+        base_model = prepare_model_for_kbit_training(
+            base_model, use_gradient_checkpointing=True
+        )
+    else:
+        print(f"[grpo] CUDA unavailable — loading {model_id} in fp32 on CPU "
+              "(end-to-end code-path test only; not a real training run).")
+        base_model = AutoModelForCausalLM.from_pretrained(
+            model_id, torch_dtype=torch.float32
+        )
 
     # Flatten chat messages -> single prompt string the way TRL expects
     def _row_to_prompt(row):
@@ -132,6 +276,13 @@ def run_grpo(args, run_dir: Path, dataset):
 
     train_rows = [{"prompt": _row_to_prompt(r), "snapshot": r} for r in dataset]
     hf_ds = Dataset.from_list(train_rows)
+
+    # ── Imitation pretrain (option C) ─────────────────────────────────────
+    # Brief SFT pass on derived ideal actions to warmstart the LoRA before
+    # GRPO. Without it, GRPO starts from random LoRA noise and the agent
+    # may need many steps to discover even basic JSON formatting.
+    if getattr(args, "imitation_warmstart", False):
+        _imitation_pretrain(base_model, tokenizer, dataset, run_dir, args)
 
     def reward_fn(completions, **kwargs):
         # `completions` is a list of decoded strings; `kwargs` contains the
@@ -167,8 +318,6 @@ def run_grpo(args, run_dir: Path, dataset):
             f"{args.batch_size * args.grad_accum}."
         )
 
-    # max_prompt_length / max_completion_length were renamed/removed in
-    # newer TRL — let TRL pick its own defaults instead of hard-coding.
     grpo_cfg = GRPOConfig(
         output_dir=str(run_dir),
         per_device_train_batch_size=args.batch_size,
@@ -181,11 +330,16 @@ def run_grpo(args, run_dir: Path, dataset):
         save_strategy="epoch",
         bf16=torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
         fp16=torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
+        # Gradient checkpointing trades a little compute for ~30% activation
+        # memory savings. Critical on the L4 24 GB.
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         seed=args.seed,
     )
 
     trainer = GRPOTrainer(
-        model=model_id,
+        model=base_model,
+        processing_class=tokenizer,
         reward_funcs=[reward_fn],
         args=grpo_cfg,
         train_dataset=hf_ds,
@@ -251,6 +405,10 @@ def main():
                    help="Use MockLLMClient for the 7 specialists (testing only)")
     p.add_argument("--tasks", default="all",
                    help="Comma-separated task IDs to train on, or 'all' (default)")
+    p.add_argument("--imitation-warmstart", action="store_true",
+                   help="One-pass SFT on derived ideal actions before GRPO. "
+                        "Gives the model a sensible prior so GRPO doesn't "
+                        "start from random LoRA noise.")
     p.add_argument("--out", default=None)
     args = p.parse_args()
 

@@ -99,6 +99,8 @@ class StockerEnv:
             ideal_pnl_pct_series=self._task.get("ideal_pnl_pct_series", []),
             ideal_pnl_pct_total=float(self._task.get("ideal_pnl_pct_total", 0.0)),
             settings=settings,
+            prices=self._prices,
+            position_after=self._position,
         )
         reward = result.score
 

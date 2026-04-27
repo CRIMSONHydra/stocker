@@ -1,14 +1,14 @@
-"""Training Space UI — minimal FastAPI + HTML.
+"""Training Space UI — Gradio (5.x).
 
-Avoids Gradio because gradio<5 pulls gradio-client==1.3.0 which constrains
-websockets<13, conflicting with openenv-core's websockets>=15.0.1.
+Compatible with openenv-core because gradio>=5 dropped the websockets<13
+pin (gradio-client 1.14+ uses websockets>=13 / >=15 family).
 
 Required Space secrets (Settings → Variables and secrets):
   HF_TOKEN      — write-access token for uploading results
   API_BASE_URL  — https://<endpoint>.endpoints.huggingface.cloud/v1
   MODEL_NAME    — ggml-org/gemma-4-26B-A4B-it-GGUF
-  RESULTS_REPO  — Hydr473/stocker-results  (defaults to this if unset)
-  USE_MOCK_SPECIALISTS=1  — fall back to MockLLMClient (skip endpoint calls)
+  RESULTS_REPO  — Hydr473/stocker-results  (defaults if unset)
+  USE_MOCK_SPECIALISTS=1  — fall back to MockLLMClient (skip endpoint)
 """
 from __future__ import annotations
 
@@ -19,9 +19,7 @@ import sys
 import threading
 from pathlib import Path
 
-import uvicorn
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+import gradio as gr
 from huggingface_hub import HfApi
 
 WORKDIR = Path(__file__).resolve().parent.parent.parent
@@ -40,6 +38,7 @@ def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> None:
         text=True,
         cwd=str(WORKDIR),
         env=env,
+        bufsize=1,
     )
     with open(LOG_PATH, "a") as lf:
         assert proc.stdout
@@ -85,7 +84,8 @@ def _run_pipeline() -> None:
          "--batch-size", "4",
          "--grad-accum", "1",
          "--lora-rank", "16",
-         "--lr", "5e-6"],
+         "--lr", "5e-6",
+         "--imitation-warmstart"],
         env_extra=endpoint_env,
     )
 
@@ -160,104 +160,25 @@ PHASE_LABELS = {
 }
 
 
-HTML_PAGE = """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Stocker — GRPO Training</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  body { background: #0f172a; color: #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 1100px; margin: 0 auto; }
-  h1 { color: #38bdf8; }
-  h2 { color: #38bdf8; border-top: 1px solid #334155; padding-top: 12px; margin-top: 24px; }
-  .status { background: #1e293b; padding: 14px 18px; border-radius: 8px; margin: 12px 0; font-size: 1.1em; border: 1px solid #334155; }
-  .btn { background: #2563eb; color: white; padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; }
-  .btn:hover { background: #1d4ed8; }
-  .btn:disabled { background: #475569; cursor: not-allowed; }
-  .logs { background: #020617; padding: 14px; border-radius: 8px; font-family: 'SF Mono', Menlo, monospace; font-size: 12px; max-height: 500px; overflow-y: auto; white-space: pre-wrap; border: 1px solid #1e293b; }
-  .plots img { max-width: 48%; border-radius: 8px; margin: 8px 1%; border: 1px solid #334155; }
-  .meta { color: #94a3b8; font-size: 0.9em; margin: 8px 0; }
-</style>
-</head>
-<body>
-  <h1>⚡ Stocker — GRPO Training</h1>
-  <p class="meta">L4 GPU · pre-cache 26B specialist votes → baseline eval → GRPO E4B → post eval → compile → upload</p>
-
-  <div class="status" id="status">Loading status…</div>
-  <button class="btn" id="launchBtn" onclick="launch()">🚀 Launch Pipeline</button>
-
-  <h2>Live logs</h2>
-  <div class="logs" id="logs">No logs yet.</div>
-
-  <h2>Plots</h2>
-  <div class="plots" id="plots">Plots appear here once training completes.</div>
-
-<script>
-async function launch() {
-  const r = await fetch('/launch', { method: 'POST' });
-  const d = await r.json();
-  if (d.status === 'started') document.getElementById('launchBtn').disabled = true;
-}
-async function poll() {
-  try {
-    const s = await (await fetch('/status')).json();
-    document.getElementById('status').textContent = s.label;
-    if (s.phase !== 'idle' && s.phase !== 'done') {
-      document.getElementById('launchBtn').disabled = true;
-    } else {
-      document.getElementById('launchBtn').disabled = false;
-    }
-    const txt = await (await fetch('/logs')).text();
-    const logsEl = document.getElementById('logs');
-    const wasNearBottom = logsEl.scrollHeight - logsEl.scrollTop - logsEl.clientHeight < 50;
-    logsEl.textContent = txt.slice(-12000) || 'No logs yet.';
-    if (wasNearBottom) logsEl.scrollTop = logsEl.scrollHeight;
-    const ps = await (await fetch('/plots')).json();
-    if (ps.length) {
-      document.getElementById('plots').innerHTML = ps.map(u => `<img src="${u}" />`).join('');
-    }
-  } catch (e) { /* ignore poll errors */ }
-}
-setInterval(poll, 3000);
-poll();
-</script>
-</body>
-</html>
-"""
+def launch_pipeline() -> str:
+    if _state["phase"] not in ("idle", "done"):
+        return PHASE_LABELS.get(_state["phase"], _state["phase"])
+    threading.Thread(target=_run_pipeline, daemon=True).start()
+    return PHASE_LABELS["precaching"]
 
 
-app = FastAPI(title="Stocker Training")
+def poll_status() -> str:
+    return PHASE_LABELS.get(_state["phase"], _state["phase"])
 
 
-@app.get("/", response_class=HTMLResponse)
-def index() -> str:
-    return HTML_PAGE
+def poll_logs() -> str:
+    if not LOG_PATH.exists():
+        return "No logs yet."
+    text = LOG_PATH.read_text()
+    return text[-12000:] if len(text) > 12000 else text
 
 
-@app.post("/launch")
-def launch():
-    if _state["phase"] in ("idle", "done"):
-        LOG_PATH.write_text("")
-        threading.Thread(target=_run_pipeline, daemon=True).start()
-        return {"status": "started"}
-    return {"status": "already_running", "phase": _state["phase"]}
-
-
-@app.get("/status")
-def status():
-    phase = _state["phase"]
-    return {"phase": phase, "label": PHASE_LABELS.get(phase, phase)}
-
-
-@app.get("/logs", response_class=PlainTextResponse)
-def logs():
-    if LOG_PATH.exists():
-        return LOG_PATH.read_text()
-    return ""
-
-
-@app.get("/plots")
-def plots():
+def poll_plots() -> list[str]:
     patterns = [
         "training/runs/grpo_*/*.png",
         "training/runs/eval_pre/*.png",
@@ -266,15 +187,57 @@ def plots():
     images = []
     for p in patterns:
         images.extend(sorted(glob.glob(str(WORKDIR / p))))
-    return [f"/plot?p={i}" for i in images]
+    return images
 
 
-@app.get("/plot")
-def plot(p: str):
-    if not p.startswith(str(WORKDIR)):
-        return PlainTextResponse("forbidden", status_code=403)
-    return FileResponse(p)
+with gr.Blocks(title="Stocker — GRPO Training") as demo:
+    gr.Markdown(
+        "# ⚡ Stocker — GRPO Training\n"
+        "L4 GPU · pre-cache 26B specialist votes → baseline eval → "
+        "GRPO E4B → post eval → compile → upload"
+    )
 
+    status_box = gr.Textbox(
+        label="Status",
+        value=PHASE_LABELS["idle"],
+        interactive=False,
+        lines=1,
+    )
+
+    with gr.Row():
+        launch_btn = gr.Button(
+            "🚀 Launch Pipeline",
+            variant="primary",
+            scale=2,
+        )
+
+    log_box = gr.Textbox(
+        label="Live logs",
+        lines=24,
+        max_lines=40,
+        interactive=False,
+        autoscroll=True,
+    )
+
+    gallery = gr.Gallery(
+        label="Plots (training curves + eval rollouts)",
+        show_label=True,
+        columns=2,
+        height="auto",
+        object_fit="contain",
+    )
+
+    launch_btn.click(fn=launch_pipeline, outputs=status_box)
+
+    timer = gr.Timer(2.0)
+    timer.tick(fn=poll_status, outputs=status_box)
+    timer.tick(fn=poll_logs,   outputs=log_box)
+    timer.tick(fn=poll_plots,  outputs=gallery)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+    # theme= moved to launch() in Gradio 6+; harmless on 5 too.
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=7860,
+        show_api=False,
+    )
