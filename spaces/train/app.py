@@ -29,7 +29,8 @@ RESULTS_REPO = os.getenv("RESULTS_REPO", "Hydr473/stocker-results")
 _state: dict = {"phase": "idle"}
 
 
-def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> None:
+def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> int:
+    """Stream a subprocess into LOG_PATH and return its exit code."""
     env = {**os.environ, **(env_extra or {})}
     proc = subprocess.Popen(
         cmd,
@@ -45,7 +46,7 @@ def _stream_proc(cmd: list[str], env_extra: dict | None = None) -> None:
         for line in proc.stdout:
             lf.write(line)
             lf.flush()
-    proc.wait()
+    return proc.wait()
 
 
 def _run_pipeline() -> None:
@@ -75,7 +76,7 @@ def _run_pipeline() -> None:
     )
 
     _state["phase"] = "training"
-    _stream_proc(
+    train_rc = _stream_proc(
         [sys.executable, "-m", "training.train_grpo",
          "--tasks", "task_easy", *train_mock_flag,
          "--model", "google/gemma-4-E4B-it",
@@ -84,10 +85,24 @@ def _run_pipeline() -> None:
          "--batch-size", "4",
          "--grad-accum", "1",
          "--lora-rank", "16",
-         "--lr", "5e-6",
-         "--imitation-warmstart"],
+         "--lr", "5e-6"],
+        # NOTE: --imitation-warmstart removed for now — SFTTrainer's
+        # get_peft_model double-injects the LoRA on top of the already-
+        # kbit-prepared 4-bit base, OOMing the L4 (22/24 GB before training
+        # even starts). The reward-formula fixes (lookahead + multi-step
+        # rollout + sharper penalty + bigger inflation + parse penalty)
+        # are the load-bearing learning signal anyway.
         env_extra=endpoint_env,
     )
+    if train_rc != 0:
+        # Halt the pipeline — running eval_post + compile + upload after a
+        # failed training step produces nonsense numbers (eval_post would
+        # use a stale or missing LoRA).
+        with open(LOG_PATH, "a") as lf:
+            lf.write(f"\n!! PHASE 3 (training) FAILED with exit {train_rc}. "
+                     f"Skipping eval_post / compile / upload. Inspect logs above.\n")
+        _state["phase"] = "done"
+        return
 
     _state["phase"] = "eval_post"
     run_dirs = sorted(glob.glob(str(WORKDIR / "training/runs/grpo_*")))
