@@ -55,6 +55,9 @@ def _run_pipeline() -> None:
         "API_BASE_URL": os.getenv("API_BASE_URL", ""),
         "MODEL_NAME":   os.getenv("MODEL_NAME", ""),
         "HF_TOKEN":     os.getenv("HF_TOKEN", ""),
+        # Reduce VRAM fragmentation (last training run had 6.6 GB reserved
+        # but unallocated, blocking a 2 MB LoRA-injection allocation).
+        "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True",
     }
     use_mock = os.getenv("USE_MOCK_SPECIALISTS", "0") == "1"
     mock_flag = ["--mock"] if use_mock else []
@@ -76,22 +79,25 @@ def _run_pipeline() -> None:
     )
 
     _state["phase"] = "training"
+    # Model choice rationale:
+    #   - Gemma 4 E4B is multimodal with image+audio encoders → ~15 GB on
+    #     L4 and LoRA OOMs at fragmentation time.
+    #   - Gemma 4 E2B (5.1B total / 2.3B effective via Per-Layer Embeddings)
+    #     is the next size down. Vision encoder ~150 MB + audio encoder
+    #     ~300 MB stay in bf16, but the LM at 4-bit + embeddings totals
+    #     ~4-5 GB → fits on L4 with comfortable headroom for grads.
+    #   - Vision/audio modality goes unused by the moderator (which only
+    #     sees text vote tables) — they're carried weight, but cheap.
     train_rc = _stream_proc(
         [sys.executable, "-m", "training.train_grpo",
          "--tasks", "task_easy", *train_mock_flag,
-         "--model", "google/gemma-4-E4B-it",
+         "--model", "google/gemma-4-E2B-it",
          "--epochs", "3",
          "--num-generations", "4",
          "--batch-size", "4",
          "--grad-accum", "1",
-         "--lora-rank", "16",
+         "--lora-rank", "8",
          "--lr", "5e-6"],
-        # NOTE: --imitation-warmstart removed for now — SFTTrainer's
-        # get_peft_model double-injects the LoRA on top of the already-
-        # kbit-prepared 4-bit base, OOMing the L4 (22/24 GB before training
-        # even starts). The reward-formula fixes (lookahead + multi-step
-        # rollout + sharper penalty + bigger inflation + parse penalty)
-        # are the load-bearing learning signal anyway.
         env_extra=endpoint_env,
     )
     if train_rc != 0:
